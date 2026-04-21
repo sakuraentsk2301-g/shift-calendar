@@ -1,0 +1,961 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>シフトカレンダー</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Hiragino Sans','Yu Gothic UI',sans-serif;background:#f0f2f5;color:#1c2333;min-height:100vh}
+.app{max-width:520px;margin:0 auto;min-height:100vh;background:#fff;display:flex;flex-direction:column}
+.topbar{background:#0f1f45;color:#fff;padding:14px 16px;display:flex;align-items:center;gap:10px;min-height:52px;position:sticky;top:0;z-index:100}
+.topbar-back{background:none;border:none;color:rgba(255,255,255,0.7);font-size:22px;cursor:pointer;padding:0 4px 0 0;display:none}
+.topbar-title{font-size:15px;font-weight:600;flex:1}
+.topbar-badge{font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px}
+.badge-admin{background:#f59e0b;color:#1c1200}
+.badge-viewer{background:rgba(255,255,255,0.2);color:#fff}
+.page{display:none;flex:1;flex-direction:column;overflow-y:auto;padding:20px 16px}
+.page.show{display:flex}
+label{display:block;font-size:12px;font-weight:600;color:#5a6282;margin-bottom:5px;margin-top:14px}
+label:first-child{margin-top:0}
+input,select{width:100%;border:1.5px solid #dde1ec;border-radius:8px;padding:10px 12px;font-size:14px;color:#1c2333;background:#fff;outline:none;font-family:inherit}
+input:focus,select:focus{border-color:#3b6ef8;box-shadow:0 0 0 3px rgba(59,110,248,0.12)}
+.btn{display:flex;align-items:center;justify-content:center;gap:6px;border:none;border-radius:8px;font-size:14px;font-weight:600;padding:11px 18px;cursor:pointer;font-family:inherit;transition:opacity .15s}
+.btn:active{opacity:.8}
+.btn-full{width:100%}
+.btn-primary{background:#0f1f45;color:#fff;margin-top:12px}
+.btn-secondary{background:#eef0f8;color:#1c2333;border:1px solid #dde1ec;margin-top:8px}
+.btn-danger{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5}
+.btn-sm{padding:7px 12px;font-size:12px;border-radius:6px;margin-top:0}
+.btn-xs{padding:4px 9px;font-size:11px;border-radius:5px;margin-top:0}
+.card{background:#fff;border:1px solid #e8eaf0;border-radius:12px;padding:16px;margin-bottom:12px}
+.alert{padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:12px;line-height:1.5}
+.alert-info{background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe}
+.alert-warn{background:#fffbeb;color:#92400e;border:1px solid #fde68a}
+.alert-err{background:#fef2f2;color:#991b1b;border:1px solid #fecaca}
+.alert-ok{background:#f0fdf4;color:#166534;border:1px solid #bbf7d0}
+.divider{height:1px;background:#eef0f8;margin:16px 0}
+.sec{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#7a8299;margin-bottom:10px}
+.url-wrap{margin-bottom:12px}
+.url-label{font-size:11px;font-weight:700;color:#7a8299;margin-bottom:4px}
+.url-box{background:#f5f7fc;border:1px solid #dde1ec;border-radius:8px;padding:10px 12px;font-size:11px;word-break:break-all;color:#3b82f6;margin-bottom:6px;line-height:1.6}
+.copy-btn{background:#0f1f45;color:#fff;border:none;border-radius:5px;font-size:11px;font-weight:600;padding:5px 12px;cursor:pointer}
+
+/* カレンダー */
+.cal-nav{display:flex;align-items:center;justify-content:space-between;padding:4px 0 14px}
+.cal-nav-btn{background:#f0f2f5;border:1px solid #dde1ec;border-radius:8px;width:36px;height:36px;font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.cal-month{font-size:17px;font-weight:700}
+.cal-year{font-size:13px;color:#7a8299;margin-left:4px}
+.cal-dow-row{display:grid;grid-template-columns:repeat(7,1fr);margin-bottom:4px}
+.cal-dow{text-align:center;font-size:11px;font-weight:600;color:#9099b4;padding:4px 0}
+.cal-dow.sun{color:#ef4444}
+.cal-dow.sat{color:#3b82f6}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+.cal-cell{border:1px solid #eef0f8;border-radius:7px;padding:3px;min-height:72px;cursor:pointer;overflow:hidden;position:relative}
+.cal-cell:hover:not(.empty){background:#f5f7fc}
+.cal-cell.empty{border-color:transparent;cursor:default}
+.cal-cell.today{border-color:#3b6ef8}
+.cal-cell.sel{background:#eff4ff;border-color:#3b6ef8}
+.cal-cell.full-day{background:#fff0f0}
+.cal-cell.sun-cell .dnum{color:#ef4444}
+.cal-cell.sat-cell .dnum{color:#3b82f6}
+.cal-cell.today .dnum{background:#0f1f45;color:#fff!important;border-radius:50%}
+.dnum{font-size:12px;font-weight:600;width:22px;height:22px;display:flex;align-items:center;justify-content:center;margin-bottom:2px}
+.cell-info{display:flex;flex-direction:column;gap:1px}
+.cell-cap{font-size:8px;font-weight:600;padding:1px 3px;border-radius:3px;background:#f0fdf4;color:#166534;display:inline-block;margin-bottom:1px}
+.cell-cap.over{background:#fee2e2;color:#991b1b}
+.cell-names{display:flex;flex-direction:column;gap:1px}
+.cell-name{font-size:8px;padding:1px 3px;border-radius:3px;background:#dbeafe;color:#1e40af;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
+
+/* タブ */
+.tabs{display:flex;border-bottom:2px solid #eef0f8;margin-bottom:16px}
+.tab{flex:1;padding:10px 6px;font-size:12px;font-weight:600;color:#9099b4;background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;cursor:pointer;font-family:inherit}
+.tab.on{color:#0f1f45;border-bottom-color:#0f1f45}
+
+/* スタッフ */
+.staff-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #f0f2f5}
+.staff-row:last-child{border-bottom:none}
+.avatar{width:34px;height:34px;border-radius:50%;background:#dbeafe;color:#1d4ed8;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+
+/* 希望一覧 */
+.req-row{display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid #f0f2f5;font-size:13px}
+.req-row:last-child{border-bottom:none}
+
+/* 勤務可能人数 */
+.cap-section{margin-bottom:8px}
+.cap-label{font-size:12px;font-weight:600;color:#5a6282;margin-bottom:6px}
+.cap-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:6px}
+.cap-item{border:1px solid #e8eaf0;border-radius:8px;padding:8px 10px;display:flex;align-items:center;gap:6px}
+.cap-item-date{font-size:11px;color:#7a8299;flex:1}
+.cap-item-val{font-size:14px;font-weight:700;color:#166534}
+
+/* 週・月集計 */
+.summary-area{margin:10px 0 6px;display:flex;flex-direction:column;gap:0}
+.week-summary{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;margin-bottom:3px}
+.week-total{background:#f0f4ff;border:1px solid #c7d2fe;border-radius:6px;padding:6px 10px;font-size:11px;font-weight:600;color:#3730a3;margin-bottom:4px}
+.month-summary{background:#0f1f45;border-radius:8px;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}
+.month-summary-label{font-size:12px;color:rgba(255,255,255,0.7)}
+.month-summary-val{font-size:16px;font-weight:700;color:#fff}
+
+/* その他 */
+.date-banner{background:#0f1f45;color:#fff;border-radius:8px;padding:10px 14px;font-size:13px;font-weight:600;margin-bottom:14px;display:none}
+.hint{padding:10px 14px;border-radius:8px;font-size:12px;background:#fffbeb;color:#92400e;border:1px solid #fde68a;margin-bottom:12px}
+.empty-state{text-align:center;padding:24px 0;color:#9099b4;font-size:13px}
+.loading{position:fixed;inset:0;background:rgba(255,255,255,0.92);display:none;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:999}
+.spin{width:32px;height:32px;border:3px solid #dde1ec;border-top-color:#0f1f45;border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-msg{font-size:13px;color:#7a8299}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(8px);background:#0f1f45;color:#fff;padding:10px 20px;border-radius:24px;font-size:13px;font-weight:500;z-index:1000;opacity:0;transition:opacity .25s,transform .25s;pointer-events:none;max-width:320px;text-align:center}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.setup-code{background:#f1f5f9;border-radius:6px;padding:10px 12px;font-family:monospace;font-size:11px;color:#334155;margin-top:8px;line-height:1.7;overflow-x:auto;white-space:pre}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <button class="topbar-back" id="backBtn" onclick="goBack()">‹</button>
+    <span class="topbar-title" id="topbarTitle">シフトカレンダー</span>
+    <span class="topbar-badge" id="topbarBadge" style="display:none"></span>
+  </div>
+
+  <!-- SETUP -->
+  <div class="page" id="pgSetup">
+    <div class="alert alert-warn">⚙ Supabaseの接続情報を入力してください</div>
+    <div class="card">
+      <label>Project URL</label>
+      <input id="cfgUrl" type="text" placeholder="https://xxxx.supabase.co">
+      <label>Anon (Public) Key</label>
+      <input id="cfgKey" type="text" placeholder="eyJ...">
+    </div>
+    <button class="btn btn-primary btn-full" onclick="doSaveSetup()">接続して始める</button>
+    <button class="btn btn-secondary btn-full" onclick="doResetAll()">🗑 全データをリセット</button>
+    <div class="divider"></div>
+    <div class="sec">SQLテーブル作成（Supabase SQL Editorで実行）</div>
+    <div class="setup-code">create table stores (
+  id text primary key,
+  name text not null,
+  viewer_token text not null,
+  created_at timestamptz default now()
+);
+create table staffs (
+  id text primary key,
+  store_id text references stores(id) on delete cascade,
+  name text not null,
+  created_at timestamptz default now(),
+  unique(store_id, name)
+);
+create table daily_capacities (
+  id text primary key,
+  store_id text references stores(id) on delete cascade,
+  date text not null,
+  capacity integer not null,
+  unique(store_id, date)
+);
+create table shift_requests (
+  id text primary key,
+  store_id text references stores(id) on delete cascade,
+  staff_name text not null,
+  date text not null,
+  type text not null check (type in ('work','off')),
+  created_at timestamptz default now(),
+  unique(store_id, staff_name, date)
+);
+alter table stores disable row level security;
+alter table staffs disable row level security;
+alter table daily_capacities disable row level security;
+alter table shift_requests disable row level security;</div>
+  </div>
+
+  <!-- HOME -->
+  <div class="page" id="pgHome">
+    <div style="text-align:center;padding:28px 0 20px">
+      <div style="width:64px;height:64px;background:#0f1f45;border-radius:16px;display:inline-flex;align-items:center;justify-content:center;margin-bottom:14px">
+        <svg width="34" height="34" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      </div>
+      <div style="font-size:20px;font-weight:700;margin-bottom:6px">シフトカレンダー</div>
+      <div style="font-size:13px;color:#7a8299">店舗ごとのシフト希望管理・共有ツール</div>
+    </div>
+    <button class="btn btn-primary btn-full" onclick="showPage('pgCreate')">＋ 新しい店舗を作成</button>
+    <div class="divider"></div>
+    <div class="sec">URLで参加</div>
+    <div class="card">
+      <label>共有URLを貼り付け</label>
+      <input id="joinUrl" type="url" placeholder="共有URLをここに貼り付け...">
+      <button class="btn btn-secondary btn-full" onclick="doJoin()">参加する</button>
+    </div>
+    <div class="divider"></div>
+    <div class="sec">最近の店舗</div>
+    <div id="recentList"><div class="empty-state">まだ店舗がありません</div></div>
+    <div class="divider"></div>
+    <div class="sec">URLを紛失した場合</div>
+    <div class="card">
+      <div class="alert alert-info" style="font-size:12px;margin-bottom:10px">
+        Supabase Dashboard → Table Editor → <strong>stores</strong> テーブルを開き、対象店舗の <strong>id</strong> 列の値をコピーして入力してください。
+      </div>
+      <label>店舗ID（Supabase の stores テーブルの id）</label>
+      <input id="recoveryStoreId" type="text" placeholder="例：abc123xyz">
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn btn-primary" style="flex:1;margin-top:0" onclick="doRecoverUrl('admin')">👑 管理者URLを復元</button>
+        <button class="btn btn-secondary" style="flex:1;margin-top:0" onclick="doRecoverUrl('viewer')">👤 閲覧者URLを復元</button>
+      </div>
+      <div id="recoveryResult" style="display:none;margin-top:12px">
+        <div class="url-label" id="recoveredLabel"></div>
+        <div class="url-box" id="recoveredUrl"></div>
+        <button class="copy-btn" onclick="copyEl('recoveredUrl')">📋 コピー</button>
+      </div>
+    </div>
+    <div class="divider"></div>
+    <button class="btn btn-secondary btn-full" onclick="showPage('pgSetup')">⚙ Supabase接続設定を変更</button>
+  </div>
+
+  <!-- ERROR (viewer without config) -->
+  <div class="page" id="pgError">
+    <div style="text-align:center;padding:48px 16px">
+      <div style="font-size:48px;margin-bottom:16px">⚠️</div>
+      <div style="font-size:16px;font-weight:700;margin-bottom:10px">URLが無効です</div>
+      <div style="font-size:13px;color:#7a8299;line-height:1.7">共有されたURLが正しくないか、期限切れの可能性があります。<br>管理者に正しいURLを再発行してもらってください。</div>
+    </div>
+  </div>
+
+  <!-- CREATE STORE -->
+  <div class="page" id="pgCreate">
+    <div class="sec">新しい店舗を作成</div>
+    <div class="card">
+      <label>店舗名</label>
+      <input id="newStoreName" type="text" placeholder="例：カフェ〇〇 渋谷店">
+    </div>
+    <button class="btn btn-primary btn-full" onclick="doCreateStore()">店舗を作成する</button>
+  </div>
+
+  <!-- STORE CREATED -->
+  <div class="page" id="pgCreated">
+    <div class="alert alert-ok">✅ 店舗が作成されました！</div>
+    <div class="alert alert-warn">⚠ URLを必ず保存してください。このページを閉じると再表示できません。</div>
+    <div class="card">
+      <div class="url-wrap">
+        <div class="url-label">👑 管理者URL</div>
+        <div class="url-box" id="createdAdminUrl"></div>
+        <button class="copy-btn" onclick="copyEl('createdAdminUrl')">📋 コピー</button>
+      </div>
+      <div style="height:10px"></div>
+      <div class="url-wrap">
+        <div class="url-label">👤 閲覧・入力URL（スタッフ向け）</div>
+        <div class="url-box" id="createdViewerUrl"></div>
+        <button class="copy-btn" onclick="copyEl('createdViewerUrl')">📋 コピー</button>
+      </div>
+    </div>
+    <button class="btn btn-primary btn-full" onclick="openCreated()">カレンダーを開く →</button>
+  </div>
+
+  <!-- CALENDAR -->
+  <div class="page" id="pgCal">
+    <div class="alert alert-info" id="viewerBanner" style="display:none;font-size:12px">
+      👤 閲覧・入力モードです。スタッフ登録や設定は管理者URLから行ってください。
+    </div>
+    <div class="cal-nav">
+      <button class="cal-nav-btn" onclick="changeMonth(-1)">‹</button>
+      <div><span class="cal-month" id="calMonthLbl"></span><span class="cal-year" id="calYearLbl"></span></div>
+      <button class="cal-nav-btn" onclick="changeMonth(1)">›</button>
+    </div>
+    <div class="cal-dow-row">
+      <div class="cal-dow sun">日</div><div class="cal-dow">月</div><div class="cal-dow">火</div>
+      <div class="cal-dow">水</div><div class="cal-dow">木</div><div class="cal-dow">金</div>
+      <div class="cal-dow sat">土</div>
+    </div>
+    <div class="cal-grid" id="calGrid"></div>
+    <div class="summary-area" id="summaryArea"></div>
+    <div class="divider"></div>
+    <div class="tabs">
+      <button class="tab on" id="tabInput" onclick="switchTab('input')">希望入力</button>
+      <button class="tab" id="tabList" onclick="switchTab('list')">一覧</button>
+      <button class="tab" id="tabAdmin" onclick="switchTab('admin')" style="display:none">管理</button>
+    </div>
+
+    <!-- 希望入力パネル -->
+    <div id="panInput">
+      <div class="date-banner" id="dateBanner"></div>
+      <div class="hint" id="dateHint">⬆ 日付をタップして出勤希望を入力</div>
+      <div id="inputForm" style="display:none">
+        <div id="capStatus" style="margin-bottom:10px"></div>
+        <label>スタッフ名を選択</label>
+        <select id="staffSel"><option value="">-- 選択してください --</option></select>
+        <div class="alert alert-err" id="inputErr" style="display:none;margin-top:10px"></div>
+        <button class="btn btn-primary btn-full" onclick="doSubmit()">出勤希望を登録する</button>
+      </div>
+    </div>
+
+    <!-- 一覧パネル -->
+    <div id="panList" style="display:none">
+      <div id="listContent"></div>
+    </div>
+
+    <!-- 管理パネル -->
+    <div id="panAdmin" style="display:none">
+      <div id="adminContent"></div>
+    </div>
+  </div>
+</div>
+
+<div class="loading" id="loading"><div class="spin"></div><div class="loading-msg" id="loadingMsg">読み込み中...</div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+// ---- State ----
+let sb = null;
+let storeId = null, role = 'viewer', viewerToken = null;
+let calY = new Date().getFullYear(), calM = new Date().getMonth();
+let selDate = null, curTab = 'input';
+let data = {staffs:[], requests:[], caps:[]};
+let createdId = null, createdVToken = null;
+
+const K_URL = 'sft2_url', K_KEY = 'sft2_key', K_RECENT = 'sft2_recent';
+const MN = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+
+// ---- Page ----
+function showPage(id) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('show'));
+  const pg = document.getElementById(id);
+  if (pg) pg.classList.add('show');
+  const back = document.getElementById('backBtn');
+  const title = document.getElementById('topbarTitle');
+  const badge = document.getElementById('topbarBadge');
+  if (id === 'pgHome') { back.style.display='none'; title.textContent='シフトカレンダー'; badge.style.display='none'; }
+  else if (id === 'pgSetup') { back.style.display='none'; title.textContent='Supabase設定'; badge.style.display='none'; }
+  else if (id === 'pgCreate') { back.style.display=''; title.textContent='店舗を作成'; }
+  else if (id === 'pgCreated') { back.style.display=''; title.textContent='店舗が作成されました'; }
+}
+
+function goBack() {
+  const shown = document.querySelector('.page.show');
+  if (!shown) return;
+  const id = shown.id;
+  if (['pgCreate','pgCreated','pgSetup'].includes(id)) { showPage('pgHome'); renderRecent(); }
+  else if (id === 'pgCal') { storeId=null; showPage('pgHome'); renderRecent(); }
+}
+
+// ---- Init ----
+window.onload = function() {
+  const p = new URLSearchParams(location.search);
+  const sid = p.get('store'), r = p.get('role'), vt = p.get('vtoken');
+  const urlParam = p.get('sburl'), keyParam = p.get('sbkey');
+
+  // 閲覧者URLにSupabase接続情報が埋め込まれている場合は自動接続
+  if (urlParam && keyParam) {
+    try {
+      sb = supabase.createClient(decodeURIComponent(urlParam), decodeURIComponent(keyParam));
+      // localStorageにも保存（次回以降の利便性のため）
+      localStorage.setItem(K_URL, decodeURIComponent(urlParam));
+      localStorage.setItem(K_KEY, decodeURIComponent(keyParam));
+    } catch(e) { sb = null; }
+  } else {
+    const savedUrl = localStorage.getItem(K_URL), savedKey = localStorage.getItem(K_KEY);
+    if (savedUrl && savedKey) { try { sb = supabase.createClient(savedUrl, savedKey); } catch(e) { sb=null; } }
+  }
+
+  // Supabase未設定かつ管理者でない場合のみSetup画面へ
+  if (!sb) {
+    if (r === 'viewer') {
+      // 閲覧者なのに設定がない → 接続情報なしエラー
+      document.querySelectorAll('.page').forEach(pg => pg.classList.remove('show'));
+      document.getElementById('pgError').classList.add('show');
+    } else {
+      showPage('pgSetup');
+    }
+    return;
+  }
+
+  if (sid && r) doEnter(sid, r, vt||'');
+  else { showPage('pgHome'); renderRecent(); }
+};
+
+// ---- Setup ----
+function doSaveSetup() {
+  const url = document.getElementById('cfgUrl').value.trim();
+  const key = document.getElementById('cfgKey').value.trim();
+  if (!url || !key) { showToast('URLとKeyを両方入力してください'); return; }
+  localStorage.setItem(K_URL, url); localStorage.setItem(K_KEY, key);
+  try { sb = supabase.createClient(url, key); showToast('設定を保存しました'); showPage('pgHome'); renderRecent(); }
+  catch(e) { showToast('接続エラー: '+e.message); }
+}
+function doResetAll() {
+  if (!confirm('全データをリセットしますか？')) return;
+  localStorage.clear(); location.reload();
+}
+
+// ---- Recent ----
+function getRecent() { try { return JSON.parse(localStorage.getItem(K_RECENT)||'[]'); } catch { return []; } }
+function addRecent(id, name, r, vt) {
+  let list = getRecent().filter(s => s.id !== id);
+  list.unshift({id, name, role:r, vt, ts:Date.now()});
+  localStorage.setItem(K_RECENT, JSON.stringify(list.slice(0,10)));
+}
+function renderRecent() {
+  const list = getRecent();
+  const el = document.getElementById('recentList');
+  if (!list.length) { el.innerHTML='<div class="empty-state">まだ店舗がありません</div>'; return; }
+  el.innerHTML = list.map(s=>{
+    const delBtn = s.role==='admin'
+      ? `<button class="btn btn-danger btn-xs" style="flex-shrink:0" onclick="event.stopPropagation();doDeleteStoreFromHome('${s.id}','${s.name}')">削除</button>`
+      : '';
+    return `
+    <div class="card" style="cursor:pointer;display:flex;align-items:center;gap:12px;margin-bottom:8px;padding:12px 14px" onclick="doEnter('${s.id}','${s.role}','${s.vt||''}')">
+      <div style="width:38px;height:38px;background:#dbeafe;color:#1d4ed8;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;flex-shrink:0">${(s.name||'?')[0]}</div>
+      <div style="flex:1"><div style="font-size:14px;font-weight:600">${s.name}</div><div style="font-size:11px;color:#9099b4">${s.role==='admin'?'管理者':'閲覧者'}</div></div>
+      ${delBtn}
+    </div>`;
+  }).join('');
+}
+
+// ---- Recover URL ----
+async function doRecoverUrl(targetRole) {
+  const sid = document.getElementById('recoveryStoreId').value.trim();
+  if (!sid) { showToast('店舗IDを入力してください'); return; }
+  showLoad('店舗情報を確認中...');
+  const { data: store, error } = await sb.from('stores').select('id, name, viewer_token').eq('id', sid).single();
+  hideLoad();
+  if (error || !store) {
+    showToast('店舗が見つかりません。IDを確認してください');
+    document.getElementById('recoveryResult').style.display = 'none';
+    return;
+  }
+  const base = location.href.split('?')[0];
+  let recoveredUrl;
+  if (targetRole === 'admin') {
+    recoveredUrl = `${base}?store=${store.id}&role=admin`;
+    document.getElementById('recoveredLabel').textContent = '👑 復元された管理者URL';
+    addRecent(store.id, store.name, 'admin', '');
+  } else {
+    const sbUrl = encodeURIComponent(localStorage.getItem(K_URL)||'');
+    const sbKey = encodeURIComponent(localStorage.getItem(K_KEY)||'');
+    recoveredUrl = `${base}?store=${store.id}&role=viewer&vtoken=${store.viewer_token}&sburl=${sbUrl}&sbkey=${sbKey}`;
+    document.getElementById('recoveredLabel').textContent = '👤 復元された閲覧者URL';
+    addRecent(store.id, store.name, 'viewer', store.viewer_token);
+  }
+  document.getElementById('recoveredUrl').textContent = recoveredUrl;
+  document.getElementById('recoveryResult').style.display = '';
+  renderRecent();
+  showToast(`「${store.name}」の${targetRole==='admin'?'管理者':'閲覧者'}URLを復元しました`);
+}
+
+// ---- Join ----
+function doJoin() {
+  const val = document.getElementById('joinUrl').value.trim();
+  try {
+    const u = new URL(val);
+    const sid=u.searchParams.get('store'), r=u.searchParams.get('role')||'viewer', vt=u.searchParams.get('vtoken')||'';
+    if (!sid) { showToast('URLが無効です'); return; }
+    doEnter(sid, r, vt);
+  } catch { showToast('正しいURLを入力してください'); }
+}
+
+// ---- Create ----
+async function doCreateStore() {
+  const name = document.getElementById('newStoreName').value.trim();
+  if (!name) { showToast('店舗名を入力してください'); return; }
+  showLoad('作成中...');
+  const id=uid(), vt=uid();
+  const {error} = await sb.from('stores').insert([{id, name, viewer_token:vt}]);
+  hideLoad();
+  if (error) { showToast('エラー: '+error.message); return; }
+  createdId=id; createdVToken=vt;
+  addRecent(id, name, 'admin', '');
+  const base = location.href.split('?')[0];
+  const sbUrl = encodeURIComponent(localStorage.getItem(K_URL)||'');
+  const sbKey = encodeURIComponent(localStorage.getItem(K_KEY)||'');
+  document.getElementById('createdAdminUrl').textContent = `${base}?store=${id}&role=admin`;
+  document.getElementById('createdViewerUrl').textContent = `${base}?store=${id}&role=viewer&vtoken=${vt}&sburl=${sbUrl}&sbkey=${sbKey}`;
+  document.getElementById('topbarTitle').textContent = name;
+  showPage('pgCreated');
+}
+function openCreated() { if (createdId) doEnter(createdId, 'admin', ''); }
+
+// ---- Enter store ----
+async function doEnter(sid, r, vt) {
+  if (!sb) { showPage('pgSetup'); return; }
+  showLoad('読み込み中...');
+  const {data:store, error} = await sb.from('stores').select('*').eq('id', sid).single();
+  hideLoad();
+  if (error || !store) { showToast('店舗が見つかりません'); return; }
+  if (r==='viewer' && vt && store.viewer_token !== vt) { showToast('URLが無効です'); return; }
+  storeId=sid; role=r; viewerToken=vt;
+  addRecent(sid, store.name, r, vt);
+  calY=new Date().getFullYear(); calM=new Date().getMonth();
+  selDate=null; curTab='input';
+  const badge=document.getElementById('topbarBadge');
+  document.getElementById('topbarTitle').textContent=store.name;
+  badge.style.display='';
+  badge.className='topbar-badge '+(r==='admin'?'badge-admin':'badge-viewer');
+  badge.textContent=r==='admin'?'管理者':'閲覧者';
+  document.getElementById('backBtn').style.display='';
+  document.getElementById('tabAdmin').style.display=r==='admin'?'':'none';
+  document.getElementById('viewerBanner').style.display=r==='viewer'?'':'none';
+  showPage('pgCal');
+  await loadData();
+  renderCal();
+  renderStaffDrop();
+  switchTab('input');
+}
+
+// ---- Load data ----
+async function loadData() {
+  const [s,rq,cp] = await Promise.all([
+    sb.from('staffs').select('*').eq('store_id',storeId).order('created_at'),
+    sb.from('shift_requests').select('*').eq('store_id',storeId),
+    sb.from('daily_capacities').select('*').eq('store_id',storeId)
+  ]);
+  data.staffs=s.data||[]; data.requests=rq.data||[]; data.caps=cp.data||[];
+}
+
+// ---- Calendar ----
+function changeMonth(d) {
+  calM+=d;
+  if(calM<0){calM=11;calY--;} if(calM>11){calM=0;calY++;}
+  renderCal();
+  // 月が変わったら日付選択リセット
+  selDate=null;
+  document.getElementById('dateBanner').style.display='none';
+  document.getElementById('dateHint').style.display='';
+  document.getElementById('inputForm').style.display='none';
+  if(curTab==='list') renderList();
+  if(curTab==='admin') renderAdmin();
+}
+
+function renderCal() {
+  document.getElementById('calMonthLbl').textContent = MN[calM];
+  document.getElementById('calYearLbl').textContent = calY+'年';
+  const today=fmtD(new Date());
+  const first=new Date(calY,calM,1).getDay();
+  const days=new Date(calY,calM+1,0).getDate();
+  let h='';
+  for(let i=0;i<first;i++) h+='<div class="cal-cell empty"></div>';
+  for(let d=1;d<=days;d++){
+    const ds=`${calY}-${p2(calM+1)}-${p2(d)}`;
+    const dow=new Date(calY,calM,d).getDay();
+    const reqs=data.requests.filter(r=>r.date===ds&&r.type==='work');
+    const capObj=data.caps.find(c=>c.date===ds);
+    const cap=capObj?capObj.capacity:null;
+    const full=cap!==null&&reqs.length>=cap;
+    const cls=['cal-cell',
+      dow===0?'sun-cell':dow===6?'sat-cell':'',
+      ds===today?'today':'',
+      ds===selDate?'sel':'',
+      full?'full-day':''
+    ].filter(Boolean).join(' ');
+
+    // 上限表示
+    let capChip='';
+    if(cap!==null){
+      capChip=`<div class="cell-cap ${full?'over':''}">${reqs.length}/${cap}人</div>`;
+    } else if(reqs.length>0){
+      capChip=`<div class="cell-cap">${reqs.length}人</div>`;
+    }
+
+    // 名前表示（最大3件、それ以上は+N）
+    let namesHtml='';
+    if(reqs.length>0){
+      const show=reqs.slice(0,3);
+      namesHtml=show.map(r=>`<div class="cell-name">${r.staff_name}</div>`).join('');
+      if(reqs.length>3) namesHtml+=`<div class="cell-name" style="background:#e0e7ff;color:#3730a3">+${reqs.length-3}</div>`;
+    }
+
+    h+=`<div class="${cls}" onclick="selDay('${ds}')">
+      <div class="dnum">${d}</div>
+      <div class="cell-info">${capChip}<div class="cell-names">${namesHtml}</div></div>
+    </div>`;
+  }
+  document.getElementById('calGrid').innerHTML=h;
+  renderSummary();
+}
+
+function renderSummary() {
+  const days = new Date(calY, calM+1, 0).getDate();
+  const first = new Date(calY, calM, 1).getDay();
+  const monthPfx = `${calY}-${p2(calM+1)}`;
+
+  // 週ごとに日付を分類
+  let weeks = [];
+  let week = [];
+  for (let i = 0; i < first; i++) week.push(null);
+  for (let d = 1; d <= days; d++) {
+    const ds = `${calY}-${p2(calM+1)}-${p2(d)}`;
+    week.push(ds);
+    if (week.length === 7) { weeks.push(week); week = []; }
+  }
+  if (week.length > 0) weeks.push(week);
+
+  // 当月の出勤希望
+  const monthReqs = data.requests.filter(r => r.type === 'work' && r.date.startsWith(monthPfx));
+  const monthTotal = monthReqs.length;
+
+  // スタッフごとの当月合計
+  const staffTotals = {};
+  monthReqs.forEach(r => { staffTotals[r.staff_name] = (staffTotals[r.staff_name]||0) + 1; });
+  const staffSorted = Object.entries(staffTotals).sort((a,b) => b[1]-a[1]);
+
+  let html = '';
+
+  // 週ごとの集計行
+  weeks.forEach((wk, wi) => {
+    const validDates = wk.filter(Boolean);
+    if (!validDates.length) return;
+    const weekReqs = data.requests.filter(r => r.type === 'work' && validDates.includes(r.date));
+    const weekTotal = weekReqs.length;
+    // 週内のスタッフ別日数
+    const wStaff = {};
+    weekReqs.forEach(r => { wStaff[r.staff_name] = (wStaff[r.staff_name]||0) + 1; });
+    const wStaffSorted = Object.entries(wStaff).sort((a,b) => b[1]-a[1]);
+    const startD = new Date(validDates[0]+'T00:00:00');
+    const endD = new Date(validDates[validDates.length-1]+'T00:00:00');
+    const label = `${startD.getMonth()+1}/${startD.getDate()}〜${endD.getMonth()+1}/${endD.getDate()}`;
+    const staffStr = wStaffSorted.length
+      ? wStaffSorted.map(([n,c]) => `<span style="background:#e0e7ff;color:#3730a3;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:600">${n} ${c}日</span>`).join(' ')
+      : '<span style="color:#9099b4;font-size:10px">なし</span>';
+    html += `<div class="week-total">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+        <span style="font-size:10px;color:#5b5ea6">第${wi+1}週 ${label}</span>
+        <span>計 <strong>${weekTotal}件</strong></span>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:3px">${staffStr}</div>
+    </div>`;
+  });
+
+  // 当月合計バー
+  const staffMonthStr = staffSorted.length
+    ? staffSorted.map(([n,c]) => `<span style="background:rgba(255,255,255,0.15);color:#fff;padding:2px 7px;border-radius:4px;font-size:11px;font-weight:600">${n} ${c}日</span>`).join(' ')
+    : '';
+  html += `<div class="month-summary" style="flex-direction:column;align-items:flex-start;gap:6px">
+    <div style="display:flex;align-items:center;justify-content:space-between;width:100%">
+      <span class="month-summary-label">${calY}年${MN[calM]} 月間合計</span>
+      <span class="month-summary-val">${monthTotal} 件</span>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:4px">${staffMonthStr}</div>
+  </div>`;
+
+  document.getElementById('summaryArea').innerHTML = html;
+}
+
+// ---- Date select ----
+function selDay(ds) {
+  selDate=ds;
+  document.getElementById('inputErr').style.display='none';
+  const d=new Date(ds+'T00:00:00');
+  const banner=document.getElementById('dateBanner');
+  banner.textContent=`${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日`;
+  banner.style.display='';
+  document.getElementById('dateHint').style.display='none';
+  document.getElementById('inputForm').style.display='';
+  renderCal();
+  updateCapStatus();
+  renderStaffDrop(); // 日付ごとに登録済みスタッフを除外して再描画
+  if(curTab==='list') renderList();
+  if(curTab==='admin') renderAdmin();
+}
+
+function updateCapStatus() {
+  if(!selDate) return;
+  const el=document.getElementById('capStatus');
+  const capObj=data.caps.find(c=>c.date===selDate);
+  const reqs=data.requests.filter(r=>r.date===selDate&&r.type==='work');
+  if(capObj){
+    const remaining=capObj.capacity-reqs.length;
+    if(remaining<=0){
+      el.innerHTML=`<div class="alert alert-err">この日の勤務可能人数（${capObj.capacity}人）に達しています。これ以上登録できません。</div>`;
+    } else {
+      el.innerHTML=`<div class="alert alert-info">勤務可能人数: ${capObj.capacity}人 ／ 残り ${remaining}人</div>`;
+    }
+  } else {
+    el.innerHTML='';
+  }
+}
+
+// ---- Submit ----
+async function doSubmit() {
+  const staff=document.getElementById('staffSel').value;
+  const err=document.getElementById('inputErr');
+  err.style.display='none';
+  if(!selDate){showToast('日付を選択してください');return;}
+  if(!staff){err.textContent='スタッフ名を選択してください';err.style.display='';return;}
+
+  // 上限チェック
+  const capObj=data.caps.find(c=>c.date===selDate);
+  if(capObj){
+    const wc=data.requests.filter(r=>r.date===selDate&&r.type==='work').length;
+    if(wc>=capObj.capacity){
+      err.textContent=`勤務可能人数（${capObj.capacity}人）を超えています。この日は登録できません。`;
+      err.style.display='';
+      return;
+    }
+  }
+
+  showLoad('登録中...');
+  const {error}=await sb.from('shift_requests').insert([{id:uid(),store_id:storeId,staff_name:staff,date:selDate,type:'work'}]);
+  hideLoad();
+  if(error){
+    err.textContent=error.code==='23505'?`${staff}はすでにこの日に登録しています`:'エラー: '+error.message;
+    err.style.display='';return;
+  }
+  await loadData(); renderCal(); updateCapStatus(); renderStaffDrop();
+  showToast('出勤希望を登録しました ✓');
+  if(curTab==='list') renderList();
+}
+
+function renderStaffDrop() {
+  const sel=document.getElementById('staffSel');
+  // 既に登録済みのスタッフは除外
+  const registered=selDate?data.requests.filter(r=>r.date===selDate&&r.type==='work').map(r=>r.staff_name):[];
+  const available=data.staffs.filter(s=>!registered.includes(s.name));
+  sel.innerHTML='<option value="">-- 選択してください --</option>'+available.map(s=>`<option value="${s.name}">${s.name}</option>`).join('');
+}
+
+// ---- Tabs ----
+function switchTab(t) {
+  curTab=t;
+  ['input','list','admin'].forEach(x=>{
+    document.getElementById('pan'+x.charAt(0).toUpperCase()+x.slice(1)).style.display=x===t?'':'none';
+    const btn=document.getElementById('tab'+x.charAt(0).toUpperCase()+x.slice(1));
+    if(btn) btn.classList.toggle('on',x===t);
+  });
+  if(t==='list') renderList();
+  if(t==='admin') renderAdmin();
+}
+
+// ---- List panel ----
+function renderList() {
+  const el=document.getElementById('listContent');
+  const reqs=selDate
+    ?data.requests.filter(r=>r.date===selDate&&r.type==='work')
+    :[...data.requests].filter(r=>r.type==='work').sort((a,b)=>a.date.localeCompare(b.date));
+  if(!reqs.length){el.innerHTML='<div class="empty-state">出勤希望がありません</div>';return;}
+  let h=`<div class="sec">${selDate?selDate+'の出勤希望':'今月の出勤希望一覧'}</div>`;
+  reqs.forEach(r=>{
+    const del=role==='admin'
+      ?`<button class="btn btn-danger btn-xs" onclick="doDelete('${r.id}','${r.staff_name}')">取消</button>`:'';
+    h+=`<div class="req-row">
+      <div class="avatar" style="width:28px;height:28px;font-size:11px">${r.staff_name[0]}</div>
+      <span style="flex:1;font-weight:500">${r.staff_name}</span>
+      <span style="font-size:11px;color:#9099b4">${selDate?'':r.date}</span>
+      ${del}
+    </div>`;
+  });
+  el.innerHTML=h;
+}
+
+async function doDelete(id, name) {
+  if(!confirm(`「${name}」の出勤希望を取り消しますか？`)) return;
+  showLoad('取消中...');
+  await sb.from('shift_requests').delete().eq('id',id);
+  await loadData(); hideLoad(); renderCal(); renderList();
+  if(selDate) updateCapStatus();
+  showToast('取り消しました');
+}
+
+// ---- Admin panel ----
+function renderAdmin() {
+  if(role!=='admin') return;
+  const el=document.getElementById('adminContent');
+  const ym=`${calY}年${MN[calM]}`;
+
+  // スタッフ管理
+  let h=`<div class="sec">スタッフ管理（${ym}）</div>`;
+  h+=`<div class="alert alert-info" style="font-size:12px">登録したスタッフは全月共通で使用されます。</div>`;
+  h+='<div class="card">';
+  h+=`<div style="display:flex;gap:8px"><input id="newStaff" type="text" placeholder="スタッフ名" style="flex:1"><button class="btn btn-primary btn-sm" onclick="doAddStaff()">追加</button></div>`;
+  h+='<div style="margin-top:10px">';
+  if(!data.staffs.length) h+='<div class="empty-state" style="padding:12px 0">スタッフがいません</div>';
+  data.staffs.forEach(s=>{
+    h+=`<div class="staff-row"><div class="avatar">${s.name[0]}</div><span style="flex:1;font-size:14px">${s.name}</span><button class="btn btn-danger btn-xs" onclick="doDelStaff('${s.id}','${s.name}')">削除</button></div>`;
+  });
+  h+='</div></div>';
+
+  // 勤務可能人数（月単位）
+  h+=`<div class="sec" style="margin-top:14px">勤務可能人数設定（${ym}）</div>`;
+  h+=`<div class="alert alert-info" style="font-size:12px">この月の全日程に一括で人数を設定できます。日付ごとに個別設定も可能です。</div>`;
+  h+='<div class="card">';
+
+  // 月一括設定
+  h+=`<div style="font-size:12px;font-weight:600;color:#5a6282;margin-bottom:8px">月一括設定</div>`;
+  h+=`<div style="display:flex;gap:8px;align-items:center">
+    <input id="bulkCap" type="number" min="0" placeholder="人数" style="width:80px">
+    <span style="font-size:13px;color:#7a8299">人 / 日</span>
+    <button class="btn btn-primary btn-sm" onclick="doBulkCap()">この月全日に設定</button>
+  </div>`;
+
+  h+='<div class="divider"></div>';
+
+  // 日別設定（選択中の日）
+  if(selDate && selDate.startsWith(`${calY}-${p2(calM+1)}`)){
+    const capObj=data.caps.find(c=>c.date===selDate);
+    const cv=capObj?capObj.capacity:'';
+    h+=`<div style="font-size:12px;font-weight:600;color:#5a6282;margin-bottom:8px">選択中の日: ${selDate}</div>`;
+    h+=`<div style="display:flex;gap:8px;align-items:center">
+      <input id="capVal" type="number" min="0" placeholder="制限なし" value="${cv}" style="width:80px">
+      <span style="font-size:13px;color:#7a8299">人</span>
+      <button class="btn btn-primary btn-sm" onclick="doSaveCap('${selDate}')">保存</button>
+      <button class="btn btn-secondary btn-sm" onclick="doClearCap('${selDate}')">解除</button>
+    </div>`;
+    h+='<div class="divider"></div>';
+  }
+
+  // 今月の設定一覧
+  const monthPfx=`${calY}-${p2(calM+1)}`;
+  const monthCaps=data.caps.filter(c=>c.date.startsWith(monthPfx)).sort((a,b)=>a.date.localeCompare(b.date));
+  h+=`<div style="font-size:12px;font-weight:600;color:#5a6282;margin-bottom:8px">今月の設定一覧</div>`;
+  if(!monthCaps.length){
+    h+='<div style="font-size:12px;color:#9099b4">設定なし</div>';
+  } else {
+    h+='<div class="cap-grid">';
+    monthCaps.forEach(c=>{
+      const reqs=data.requests.filter(r=>r.date===c.date&&r.type==='work').length;
+      const over=reqs>=c.capacity;
+      h+=`<div class="cap-item" style="${over?'border-color:#fca5a5;background:#fff5f5':''}">
+        <span class="cap-item-date">${c.date.slice(5)}</span>
+        <span class="cap-item-val" style="${over?'color:#991b1b':''}">${reqs}/${c.capacity}</span>
+        <button class="btn btn-danger btn-xs" style="padding:2px 6px;font-size:10px" onclick="doClearCap('${c.date}')">×</button>
+      </div>`;
+    });
+    h+='</div>';
+  }
+  h+='</div>';
+
+  // 共有URL
+  const base=location.href.split('?')[0];
+  h+=`<div class="sec" style="margin-top:14px">共有URL</div><div class="card">`;
+  h+=`<div class="url-wrap"><div class="url-label">👑 管理者URL</div><div class="url-box" id="adminUrlBox">${base}?store=${storeId}&role=admin</div><button class="copy-btn" onclick="copyEl('adminUrlBox')">コピー</button></div>`;
+  h+=`<div class="url-wrap" style="margin-top:10px"><div class="url-label">👤 閲覧・入力URL</div><div class="url-box" id="viewerUrlBox">読み込み中...</div><button class="copy-btn" onclick="copyEl('viewerUrlBox')">コピー</button></div>`;
+  h+='</div>';
+
+  // ホームへ戻る・店舗削除
+  h+=`<div class="divider"></div>`;
+  h+=`<button class="btn btn-secondary btn-full" style="margin-top:0" onclick="goHomeFromCal()">🏠 シフトカレンダーホームへ戻る</button>`;
+  h+=`<button class="btn btn-danger btn-full" style="margin-top:8px" onclick="doDeleteStore()">🗑 この店舗を削除する</button>`;
+  h+=`<div style="font-size:11px;color:#9099b4;margin-top:6px;text-align:center">店舗を削除すると全データが完全に削除されます</div>`;
+
+  el.innerHTML=h;
+
+  sb.from('stores').select('viewer_token').eq('id',storeId).single().then(({data:sd})=>{
+    const box=document.getElementById('viewerUrlBox');
+    if(box&&sd){
+      const sbUrl=encodeURIComponent(localStorage.getItem(K_URL)||'');
+      const sbKey=encodeURIComponent(localStorage.getItem(K_KEY)||'');
+      box.textContent=`${base}?store=${storeId}&role=viewer&vtoken=${sd.viewer_token}&sburl=${sbUrl}&sbkey=${sbKey}`;
+    }
+  });
+}
+
+async function doAddStaff() {
+  const name=document.getElementById('newStaff').value.trim();
+  if(!name){showToast('名前を入力してください');return;}
+  showLoad('追加中...');
+  const {error}=await sb.from('staffs').insert([{id:uid(),store_id:storeId,name}]);
+  hideLoad();
+  if(error){showToast(error.code==='23505'?'同じ名前のスタッフが既に存在します':'エラー: '+error.message);return;}
+  await loadData(); renderStaffDrop(); renderAdmin(); showToast(name+' を追加しました');
+}
+
+async function doDelStaff(id, name) {
+  if(!confirm(`「${name}」を削除しますか？`)) return;
+  showLoad('削除中...');
+  await sb.from('staffs').delete().eq('id',id);
+  await loadData(); hideLoad(); renderStaffDrop(); renderAdmin(); showToast('削除しました');
+}
+
+async function doBulkCap() {
+  const val=parseInt(document.getElementById('bulkCap').value);
+  if(isNaN(val)||val<0){showToast('有効な人数を入力してください');return;}
+  const days=new Date(calY,calM+1,0).getDate();
+  showLoad('一括設定中...');
+  for(let d=1;d<=days;d++){
+    const ds=`${calY}-${p2(calM+1)}-${p2(d)}`;
+    const existing=data.caps.find(c=>c.date===ds);
+    if(existing) await sb.from('daily_capacities').update({capacity:val}).eq('id',existing.id);
+    else await sb.from('daily_capacities').insert([{id:uid(),store_id:storeId,date:ds,capacity:val}]);
+  }
+  await loadData(); hideLoad(); renderCal(); renderAdmin();
+  showToast(`${calY}年${MN[calM]}の全日を ${val}人 に設定しました`);
+}
+
+async function doSaveCap(ds) {
+  const val=parseInt(document.getElementById('capVal').value);
+  if(isNaN(val)||val<0){showToast('有効な人数を入力してください');return;}
+  showLoad('保存中...');
+  const existing=data.caps.find(c=>c.date===ds);
+  if(existing) await sb.from('daily_capacities').update({capacity:val}).eq('id',existing.id);
+  else await sb.from('daily_capacities').insert([{id:uid(),store_id:storeId,date:ds,capacity:val}]);
+  await loadData(); hideLoad(); renderCal(); renderAdmin(); updateCapStatus();
+  showToast(`${ds} の上限を ${val}人 に設定しました`);
+}
+
+async function doClearCap(ds) {
+  showLoad('解除中...');
+  await sb.from('daily_capacities').delete().eq('store_id',storeId).eq('date',ds);
+  await loadData(); hideLoad(); renderCal(); renderAdmin();
+  if(selDate===ds) updateCapStatus();
+  showToast('上限を解除しました');
+}
+
+async function doDelete(id, name) {
+  if(!confirm(`「${name}」の出勤希望を取り消しますか？`)) return;
+  showLoad('取消中...');
+  await sb.from('shift_requests').delete().eq('id',id);
+  await loadData(); hideLoad(); renderCal(); renderList();
+  renderStaffDrop();
+  if(selDate) updateCapStatus();
+  showToast('取り消しました');
+}
+
+// ---- Home / Delete store ----
+function goHomeFromCal() {
+  storeId = null;
+  showPage('pgHome');
+  renderRecent();
+}
+
+async function doDeleteStoreFromHome(sid, sname) {
+  if (!confirm(`「${sname}」を削除しますか？\n\nスタッフ・シフト希望・勤務人数設定など全データが完全に削除されます。この操作は取り消せません。`)) return;
+  if (!confirm(`本当に削除しますか？\n「${sname}」のデータはすべて失われます。`)) return;
+  showLoad('店舗を削除中...');
+  const { error } = await sb.from('stores').delete().eq('id', sid);
+  hideLoad();
+  if (error) { showToast('エラー: ' + error.message); return; }
+  const recent = getRecent().filter(s => s.id !== sid);
+  localStorage.setItem(K_RECENT, JSON.stringify(recent));
+  showToast('店舗を削除しました');
+  renderRecent();
+}
+
+async function doDeleteStore() {
+  const storeName = document.getElementById('topbarTitle').textContent;
+  if (!confirm(`「${storeName}」を削除しますか？\n\nスタッフ・シフト希望・勤務人数設定など全データが完全に削除されます。この操作は取り消せません。`)) return;
+  if (!confirm(`本当に削除しますか？\n「${storeName}」のデータはすべて失われます。`)) return;
+  showLoad('店舗を削除中...');
+  // ON DELETE CASCADE で関連データも自動削除
+  const { error } = await sb.from('stores').delete().eq('id', storeId);
+  hideLoad();
+  if (error) { showToast('エラー: ' + error.message); return; }
+  // 最近の店舗リストからも削除
+  const recent = getRecent().filter(s => s.id !== storeId);
+  localStorage.setItem(K_RECENT, JSON.stringify(recent));
+  storeId = null;
+  showToast('店舗を削除しました');
+  showPage('pgHome');
+  renderRecent();
+}
+
+// ---- Utils ----
+function uid(){return Math.random().toString(36).substr(2,9)+Date.now().toString(36)}
+function fmtD(d){return `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}`}
+function p2(n){return String(n).padStart(2,'0')}
+function showLoad(m){document.getElementById('loadingMsg').textContent=m||'読み込み中...';document.getElementById('loading').style.display='flex'}
+function hideLoad(){document.getElementById('loading').style.display='none'}
+let _tt;
+function showToast(m){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(_tt);_tt=setTimeout(()=>t.classList.remove('show'),2800)}
+function copyEl(id){
+  const t=document.getElementById(id);if(!t)return;
+  navigator.clipboard.writeText(t.textContent)
+    .then(()=>showToast('コピーしました ✓'))
+    .catch(()=>{const ta=document.createElement('textarea');ta.value=t.textContent;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);showToast('コピーしました ✓');});
+}
+</script>
+</body>
+</html>
