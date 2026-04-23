@@ -109,6 +109,18 @@ input:focus,select:focus{border-color:#3b6ef8;box-shadow:0 0 0 3px rgba(59,110,2
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(8px);background:#0f1f45;color:#fff;padding:10px 20px;border-radius:24px;font-size:13px;font-weight:500;z-index:1000;opacity:0;transition:opacity .25s,transform .25s;pointer-events:none;max-width:320px;text-align:center}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 .setup-code{background:#f1f5f9;border-radius:6px;padding:10px 12px;font-family:monospace;font-size:11px;color:#334155;margin-top:8px;line-height:1.7;overflow-x:auto;white-space:pre}
+
+/* 日付モーダル */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:200;display:none;align-items:flex-end;justify-content:center}
+.modal-overlay.show{display:flex}
+.modal-sheet{background:#fff;border-radius:20px 20px 0 0;width:100%;max-width:520px;padding:20px 20px 36px;animation:slideUp .2s ease}
+@keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+.modal-handle{width:40px;height:4px;background:#dde1ec;border-radius:2px;margin:0 auto 16px}
+.modal-date{font-size:16px;font-weight:700;margin-bottom:4px;color:#0f1f45}
+.modal-cap-status{font-size:12px;margin-bottom:14px}
+.modal-names{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:14px;min-height:10px}
+.modal-name-chip{font-size:12px;font-weight:600;background:#dbeafe;color:#1e40af;padding:3px 8px;border-radius:6px}
+.modal-section-label{font-size:11px;font-weight:700;color:#7a8299;letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px}
 </style>
 </head>
 <body>
@@ -293,6 +305,32 @@ alter table shift_requests disable row level security;</div>
     <!-- 管理パネル -->
     <div id="panAdmin" style="display:none">
       <div id="adminContent"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 日付タップモーダル -->
+<div class="modal-overlay" id="modalOverlay" onclick="closeModal(event)">
+  <div class="modal-sheet" id="modalSheet">
+    <div class="modal-handle"></div>
+    <div class="modal-date" id="modalDate"></div>
+    <div class="modal-cap-status" id="modalCapStatus"></div>
+    <div id="modalNamesWrap" style="display:none">
+      <div class="modal-section-label">登録済みの出勤希望</div>
+      <div class="modal-names" id="modalNames"></div>
+    </div>
+    <div id="modalInputArea">
+      <div class="modal-section-label">出勤希望を登録</div>
+      <select class="field-input" id="modalStaffSel" style="margin-bottom:10px"><option value="">-- スタッフを選択 --</option></select>
+      <div class="alert alert-err" id="modalErr" style="display:none;margin-bottom:10px"></div>
+      <button class="btn btn-primary btn-full" style="margin-top:0" onclick="doModalSubmit()">出勤希望を登録する</button>
+    </div>
+    <div id="modalFullMsg" style="display:none">
+      <div class="alert alert-err" style="margin-bottom:0">この日の勤務可能人数に達しています。</div>
+    </div>
+    <div id="modalAdminArea" style="display:none;margin-top:12px">
+      <div class="modal-section-label">管理者操作</div>
+      <div id="modalDeleteList"></div>
     </div>
   </div>
 </div>
@@ -637,19 +675,139 @@ function renderSummary() {
 
 // ---- Date select ----
 function selDay(ds) {
-  selDate=ds;
-  document.getElementById('inputErr').style.display='none';
-  const d=new Date(ds+'T00:00:00');
-  const banner=document.getElementById('dateBanner');
-  banner.textContent=`${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日`;
-  banner.style.display='';
-  document.getElementById('dateHint').style.display='none';
-  document.getElementById('inputForm').style.display='';
+  selDate = ds;
   renderCal();
+  // 下パネルも更新
+  const d = new Date(ds+'T00:00:00');
+  const banner = document.getElementById('dateBanner');
+  banner.textContent = `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日`;
+  banner.style.display = '';
+  document.getElementById('dateHint').style.display = 'none';
+  document.getElementById('inputForm').style.display = '';
+  document.getElementById('inputErr').style.display = 'none';
   updateCapStatus();
-  renderStaffDrop(); // 日付ごとに登録済みスタッフを除外して再描画
+  renderStaffDrop();
   if(curTab==='list') renderList();
   if(curTab==='admin') renderAdmin();
+  openModal(ds);
+}
+
+function openModal(ds) {
+  const d = new Date(ds+'T00:00:00');
+  const dow = ['日','月','火','水','木','金','土'][d.getDay()];
+  document.getElementById('modalDate').textContent =
+    `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日（${dow}）`;
+  document.getElementById('modalErr').style.display = 'none';
+
+  // 登録済み出勤者
+  const reqs = data.requests.filter(r => r.date === ds && r.type === 'work');
+  const namesEl = document.getElementById('modalNames');
+  const namesWrap = document.getElementById('modalNamesWrap');
+  if (reqs.length) {
+    namesEl.innerHTML = reqs.map(r => `<span class="modal-name-chip">${r.staff_name}</span>`).join('');
+    namesWrap.style.display = '';
+  } else {
+    namesWrap.style.display = 'none';
+  }
+
+  // 上限チェック
+  const capObj = data.caps.find(c => c.date === ds);
+  const cap = capObj ? capObj.capacity : null;
+  const full = cap !== null && reqs.length >= cap;
+  const capEl = document.getElementById('modalCapStatus');
+  if (cap !== null) {
+    const remaining = cap - reqs.length;
+    capEl.innerHTML = full
+      ? `<span style="color:#991b1b;font-weight:600">上限 ${cap}人 ／ 残り 0人</span>`
+      : `<span style="color:#166534">勤務可能人数: ${cap}人 ／ 残り ${remaining}人</span>`;
+  } else {
+    capEl.innerHTML = reqs.length > 0
+      ? `<span style="color:#5a6282">現在 ${reqs.length}人 登録済み</span>`
+      : '';
+  }
+
+  // 入力フォーム or 満員メッセージ
+  const inputArea = document.getElementById('modalInputArea');
+  const fullMsg = document.getElementById('modalFullMsg');
+  if (full) {
+    inputArea.style.display = 'none';
+    fullMsg.style.display = '';
+  } else {
+    inputArea.style.display = '';
+    fullMsg.style.display = 'none';
+    // スタッフドロップダウン（登録済み除外）
+    const registered = reqs.map(r => r.staff_name);
+    const available = data.staffs.filter(s => !registered.includes(s.name));
+    const sel = document.getElementById('modalStaffSel');
+    sel.innerHTML = '<option value="">-- スタッフを選択 --</option>' +
+      available.map(s => `<option value="${s.name}">${s.name}</option>`).join('');
+  }
+
+  // 管理者：取消ボタン
+  const adminArea = document.getElementById('modalAdminArea');
+  const deleteList = document.getElementById('modalDeleteList');
+  if (role === 'admin' && reqs.length) {
+    deleteList.innerHTML = reqs.map(r =>
+      `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f0f2f5">
+        <span style="flex:1;font-size:13px;font-weight:500">${r.staff_name}</span>
+        <button class="btn btn-danger btn-xs" onclick="doModalDelete('${r.id}','${r.staff_name}','${ds}')">取消</button>
+      </div>`
+    ).join('');
+    adminArea.style.display = '';
+  } else {
+    adminArea.style.display = 'none';
+  }
+
+  document.getElementById('modalOverlay').classList.add('show');
+}
+
+function closeModal(e) {
+  if (e && e.target !== document.getElementById('modalOverlay')) return;
+  document.getElementById('modalOverlay').classList.remove('show');
+}
+
+async function doModalSubmit() {
+  const staff = document.getElementById('modalStaffSel').value;
+  const err = document.getElementById('modalErr');
+  err.style.display = 'none';
+  if (!staff) { err.textContent = 'スタッフ名を選択してください'; err.style.display = ''; return; }
+
+  // 上限再チェック
+  const capObj = data.caps.find(c => c.date === selDate);
+  if (capObj) {
+    const wc = data.requests.filter(r => r.date === selDate && r.type === 'work').length;
+    if (wc >= capObj.capacity) {
+      err.textContent = `勤務可能人数（${capObj.capacity}人）を超えています。`;
+      err.style.display = ''; return;
+    }
+  }
+
+  showLoad('登録中...');
+  const {error} = await sb.from('shift_requests').insert([{
+    id: uid(), store_id: storeId, staff_name: staff, date: selDate, type: 'work'
+  }]);
+  hideLoad();
+  if (error) {
+    err.textContent = error.code === '23505' ? `${staff}はすでにこの日に登録しています` : 'エラー: '+error.message;
+    err.style.display = ''; return;
+  }
+  await loadData();
+  renderCal();
+  renderSummary();
+  showToast('出勤希望を登録しました ✓');
+  // モーダルを更新（同じ日のまま再表示）
+  openModal(selDate);
+  if(curTab==='list') renderList();
+}
+
+async function doModalDelete(id, name, ds) {
+  if (!confirm(`「${name}」の出勤希望を取り消しますか？`)) return;
+  showLoad('取消中...');
+  await sb.from('shift_requests').delete().eq('id', id);
+  await loadData(); hideLoad(); renderCal(); renderSummary();
+  showToast('取り消しました');
+  openModal(ds);
+  if(curTab==='list') renderList();
 }
 
 function updateCapStatus() {
