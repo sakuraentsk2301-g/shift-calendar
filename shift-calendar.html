@@ -154,6 +154,7 @@ create table staffs (
   id text primary key,
   store_id text references stores(id) on delete cascade,
   name text not null,
+  monthly_limit integer default null,
   created_at timestamptz default now(),
   unique(store_id, name)
 );
@@ -173,6 +174,8 @@ create table shift_requests (
   created_at timestamptz default now(),
   unique(store_id, staff_name, date)
 );
+-- 既存テーブルへのカラム追加（初回実行時は不要）
+alter table staffs add column if not exists monthly_limit integer default null;
 alter table stores disable row level security;
 alter table staffs disable row level security;
 alter table daily_capacities disable row level security;
@@ -660,7 +663,13 @@ function renderSummary() {
 
   // 当月合計バー
   const staffMonthStr = staffSorted.length
-    ? staffSorted.map(([n,c]) => `<span style="background:rgba(255,255,255,0.15);color:#fff;padding:2px 7px;border-radius:4px;font-size:11px;font-weight:600">${n} ${c}日</span>`).join(' ')
+    ? staffSorted.map(([n,cnt]) => {
+        const staffObj = data.staffs.find(s=>s.name===n);
+        const lim = staffObj&&staffObj.monthly_limit!==null?staffObj.monthly_limit:null;
+        const over = lim!==null&&cnt>=lim;
+        const label = lim!==null?`${n} ${cnt}/${lim}日`:`${n} ${cnt}日`;
+        return `<span style="background:${over?'#fecaca':'rgba(255,255,255,0.15)'};color:${over?'#991b1b':'#fff'};padding:2px 7px;border-radius:4px;font-size:11px;font-weight:600">${label}</span>`;
+      }).join(' ')
     : '';
   html += `<div class="month-summary" style="flex-direction:column;align-items:flex-start;gap:6px">
     <div style="display:flex;align-items:center;justify-content:space-between;width:100%">
@@ -735,12 +744,16 @@ function openModal(ds) {
   } else {
     inputArea.style.display = '';
     fullMsg.style.display = 'none';
-    // スタッフドロップダウン（登録済み除外）
-    const registered = reqs.map(r => r.staff_name);
-    const available = data.staffs.filter(s => !registered.includes(s.name));
+    // スタッフドロップダウン（登録済み・月上限到達を除外）
+    const available = getAvailableStaffs(ds);
+    const monthPfxM = ds.slice(0,7);
     const sel = document.getElementById('modalStaffSel');
     sel.innerHTML = '<option value="">-- スタッフを選択 --</option>' +
-      available.map(s => `<option value="${s.name}">${s.name}</option>`).join('');
+      available.map(s => {
+        const used=data.requests.filter(r=>r.type==='work'&&r.staff_name===s.name&&r.date.startsWith(monthPfxM)).length;
+        const limInfo=s.monthly_limit!==null?` (今月${used}/${s.monthly_limit}日)`:'';
+        return `<option value="${s.name}">${s.name}${limInfo}</option>`;
+      }).join('');
   }
 
   // 管理者：取消ボタン
@@ -858,12 +871,32 @@ async function doSubmit() {
   if(curTab==='list') renderList();
 }
 
+function getAvailableStaffs(dateStr) {
+  // その日に登録済みのスタッフを除外
+  const registeredToday = dateStr
+    ? data.requests.filter(r=>r.date===dateStr&&r.type==='work').map(r=>r.staff_name)
+    : [];
+  // 月の上限に達したスタッフを除外
+  const monthPfx = dateStr ? dateStr.slice(0,7) : `${calY}-${p2(calM+1)}`;
+  return data.staffs.filter(s => {
+    if (registeredToday.includes(s.name)) return false;
+    if (s.monthly_limit !== null) {
+      const used = data.requests.filter(r=>r.type==='work'&&r.staff_name===s.name&&r.date.startsWith(monthPfx)).length;
+      if (used >= s.monthly_limit) return false;
+    }
+    return true;
+  });
+}
+
 function renderStaffDrop() {
   const sel=document.getElementById('staffSel');
-  // 既に登録済みのスタッフは除外
-  const registered=selDate?data.requests.filter(r=>r.date===selDate&&r.type==='work').map(r=>r.staff_name):[];
-  const available=data.staffs.filter(s=>!registered.includes(s.name));
-  sel.innerHTML='<option value="">-- 選択してください --</option>'+available.map(s=>`<option value="${s.name}">${s.name}</option>`).join('');
+  const available = getAvailableStaffs(selDate);
+  sel.innerHTML='<option value="">-- 選択してください --</option>'+available.map(s=>{
+    const monthPfx=selDate?selDate.slice(0,7):`${calY}-${p2(calM+1)}`;
+    const used=data.requests.filter(r=>r.type==='work'&&r.staff_name===s.name&&r.date.startsWith(monthPfx)).length;
+    const limInfo=s.monthly_limit!==null?` (今月${used}/${s.monthly_limit}日)`:'';
+    return `<option value="${s.name}">${s.name}${limInfo}</option>`;
+  }).join('');
 }
 
 // ---- Tabs ----
@@ -918,11 +951,28 @@ function renderAdmin() {
   let h=`<div class="sec">スタッフ管理（${ym}）</div>`;
   h+=`<div class="alert alert-info" style="font-size:12px">登録したスタッフは全月共通で使用されます。</div>`;
   h+='<div class="card">';
-  h+=`<div style="display:flex;gap:8px"><input id="newStaff" type="text" placeholder="スタッフ名" style="flex:1"><button class="btn btn-primary btn-sm" onclick="doAddStaff()">追加</button></div>`;
+  h+=`<div style="display:flex;gap:8px;margin-bottom:6px"><input id="newStaff" type="text" placeholder="スタッフ名" style="flex:1"><input id="newStaffLimit" type="number" min="1" placeholder="上限日数" style="width:80px" title="月の勤務上限日数（空欄=無制限）"></div>`;
+  h+=`<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="font-size:11px;color:#7a8299">月の勤務上限日数（空欄で無制限）</span></div>`;
+  h+=`<button class="btn btn-primary btn-sm btn-full" style="margin-top:0" onclick="doAddStaff()">スタッフを追加</button>`;
   h+='<div style="margin-top:10px">';
   if(!data.staffs.length) h+='<div class="empty-state" style="padding:12px 0">スタッフがいません</div>';
+  const monthPfxS=`${calY}-${p2(calM+1)}`;
   data.staffs.forEach(s=>{
-    h+=`<div class="staff-row"><div class="avatar">${s.name[0]}</div><span style="flex:1;font-size:14px">${s.name}</span><button class="btn btn-danger btn-xs" onclick="doDelStaff('${s.id}','${s.name}')">削除</button></div>`;
+    const used=data.requests.filter(r=>r.type==='work'&&r.staff_name===s.name&&r.date.startsWith(monthPfxS)).length;
+    const lim=s.monthly_limit;
+    const over=lim!==null&&used>=lim;
+    const limBadge=lim!==null
+      ?`<span style="font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px;background:${over?'#fee2e2':'#f0fdf4'};color:${over?'#991b1b':'#166534'}">${used}/${lim}日</span>`
+      :`<span style="font-size:10px;color:#9099b4">上限なし</span>`;
+    h+=`<div class="staff-row">
+      <div class="avatar">${s.name[0]}</div>
+      <div style="flex:1">
+        <div style="font-size:14px;font-weight:500">${s.name}</div>
+        <div style="display:flex;align-items:center;gap:6px;margin-top:2px">${limBadge}</div>
+      </div>
+      <button class="btn btn-secondary btn-xs" onclick="doEditStaffLimit('${s.id}','${s.name}',${lim===null?'null':lim})">編集</button>
+      <button class="btn btn-danger btn-xs" onclick="doDelStaff('${s.id}','${s.name}')">削除</button>
+    </div>`;
   });
   h+='</div></div>';
 
@@ -1004,11 +1054,28 @@ function renderAdmin() {
 async function doAddStaff() {
   const name=document.getElementById('newStaff').value.trim();
   if(!name){showToast('名前を入力してください');return;}
+  const limitVal=document.getElementById('newStaffLimit').value.trim();
+  const monthly_limit=limitVal&&parseInt(limitVal)>0?parseInt(limitVal):null;
   showLoad('追加中...');
-  const {error}=await sb.from('staffs').insert([{id:uid(),store_id:storeId,name}]);
+  const {error}=await sb.from('staffs').insert([{id:uid(),store_id:storeId,name,monthly_limit}]);
   hideLoad();
   if(error){showToast(error.code==='23505'?'同じ名前のスタッフが既に存在します':'エラー: '+error.message);return;}
-  await loadData(); renderStaffDrop(); renderAdmin(); showToast(name+' を追加しました');
+  await loadData(); renderStaffDrop(); renderAdmin();
+  showToast(name+(monthly_limit?` を追加しました（上限${monthly_limit}日）`:' を追加しました'));
+}
+
+async function doEditStaffLimit(id, name, currentLimit) {
+  const input = prompt(`「${name}」の月の勤務上限日数を入力してください
+（空欄で無制限）`, currentLimit===null?'':currentLimit);
+  if (input === null) return; // キャンセル
+  const monthly_limit = input.trim()===''?null:parseInt(input);
+  if (input.trim()!=='' && (isNaN(monthly_limit)||monthly_limit<1)) {
+    showToast('有効な日数を入力してください'); return;
+  }
+  showLoad('更新中...');
+  await sb.from('staffs').update({monthly_limit}).eq('id',id);
+  await loadData(); hideLoad(); renderAdmin();
+  showToast(monthly_limit?`${name} の上限を ${monthly_limit}日 に設定しました`:`${name} の上限を解除しました`);
 }
 
 async function doDelStaff(id, name) {
