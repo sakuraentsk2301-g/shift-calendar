@@ -155,6 +155,7 @@ create table staffs (
   store_id text references stores(id) on delete cascade,
   name text not null,
   monthly_limit integer default null,
+  color text default null,
   created_at timestamptz default now(),
   unique(store_id, name)
 );
@@ -176,6 +177,7 @@ create table shift_requests (
 );
 -- 既存テーブルへのカラム追加（初回実行時は不要）
 alter table staffs add column if not exists monthly_limit integer default null;
+alter table staffs add column if not exists color text default null;
 alter table stores disable row level security;
 alter table staffs disable row level security;
 alter table daily_capacities disable row level security;
@@ -352,6 +354,32 @@ let createdId = null, createdVToken = null;
 
 const K_URL = 'sft2_url', K_KEY = 'sft2_key', K_RECENT = 'sft2_recent';
 const MN = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+
+// 12色パレット [背景色, テキスト色, ラベル]
+const STAFF_COLORS = [
+  ['#dbeafe','#1e40af','ブルー'],
+  ['#dcfce7','#166534','グリーン'],
+  ['#fce7f3','#9d174d','ピンク'],
+  ['#fef9c3','#854d0e','イエロー'],
+  ['#ede9fe','#5b21b6','パープル'],
+  ['#ffedd5','#9a3412','オレンジ'],
+  ['#cffafe','#164e63','シアン'],
+  ['#fecaca','#991b1b','レッド'],
+  ['#d1fae5','#065f46','エメラルド'],
+  ['#e0e7ff','#3730a3','インディゴ'],
+  ['#f3f4f6','#374151','グレー'],
+  ['#fdf4ff','#7e22ce','フクシア'],
+];
+function staffColor(s) {
+  if (s && s.color) {
+    const found = STAFF_COLORS.find(([bg]) => bg === s.color);
+    if (found) return found;
+  }
+  return STAFF_COLORS[0];
+}
+function getStaffObj(name) {
+  return data.staffs.find(s => s.name === name) || null;
+}
 
 // ---- Page ----
 function showPage(id) {
@@ -592,12 +620,16 @@ function renderCal() {
       capChip=`<div class="cell-cap">${reqs.length}人</div>`;
     }
 
-    // 名前表示（最大3件、それ以上は+N）
+    // 名前表示（最大6件、7人目から+N）
     let namesHtml='';
     if(reqs.length>0){
-      const show=reqs.slice(0,3);
-      namesHtml=show.map(r=>`<div class="cell-name">${r.staff_name}</div>`).join('');
-      if(reqs.length>3) namesHtml+=`<div class="cell-name" style="background:#e0e7ff;color:#3730a3">+${reqs.length-3}</div>`;
+      const show=reqs.slice(0,6);
+      namesHtml=show.map(r=>{
+        const so=getStaffObj(r.staff_name);
+        const [bg,fg]=staffColor(so);
+        return `<div class="cell-name" style="background:${bg};color:${fg}">${r.staff_name}</div>`;
+      }).join('');
+      if(reqs.length>6) namesHtml+=`<div class="cell-name" style="background:#e0e7ff;color:#3730a3">+${reqs.length-6}</div>`;
     }
 
     h+=`<div class="${cls}" onclick="selDay('${ds}')">
@@ -650,7 +682,10 @@ function renderSummary() {
     const endD = new Date(validDates[validDates.length-1]+'T00:00:00');
     const label = `${startD.getMonth()+1}/${startD.getDate()}〜${endD.getMonth()+1}/${endD.getDate()}`;
     const staffStr = wStaffSorted.length
-      ? wStaffSorted.map(([n,c]) => `<span style="background:#e0e7ff;color:#3730a3;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:600">${n} ${c}日</span>`).join(' ')
+      ? wStaffSorted.map(([n,cnt]) => {
+          const so=getStaffObj(n); const [bg,fg]=staffColor(so);
+          return `<span style="background:${bg};color:${fg};padding:1px 5px;border-radius:3px;font-size:10px;font-weight:600">${n} ${cnt}日</span>`;
+        }).join(' ')
       : '<span style="color:#9099b4;font-size:10px">なし</span>';
     html += `<div class="week-total">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
@@ -664,11 +699,11 @@ function renderSummary() {
   // 当月合計バー
   const staffMonthStr = staffSorted.length
     ? staffSorted.map(([n,cnt]) => {
-        const staffObj = data.staffs.find(s=>s.name===n);
-        const lim = staffObj&&staffObj.monthly_limit!==null?staffObj.monthly_limit:null;
-        const over = lim!==null&&cnt>=lim;
-        const label = lim!==null?`${n} ${cnt}/${lim}日`:`${n} ${cnt}日`;
-        return `<span style="background:${over?'#fecaca':'rgba(255,255,255,0.15)'};color:${over?'#991b1b':'#fff'};padding:2px 7px;border-radius:4px;font-size:11px;font-weight:600">${label}</span>`;
+        const so=getStaffObj(n); const [bg,fg]=staffColor(so);
+        const lim=so&&so.monthly_limit!==null?so.monthly_limit:null;
+        const over=lim!==null&&cnt>=lim;
+        const label=lim!==null?`${n} ${cnt}/${lim}日`:`${n} ${cnt}日`;
+        return `<span style="background:${over?'#fecaca':bg};color:${over?'#991b1b':fg};padding:2px 7px;border-radius:4px;font-size:11px;font-weight:600">${label}</span>`;
       }).join(' ')
     : '';
   html += `<div class="month-summary" style="flex-direction:column;align-items:flex-start;gap:6px">
@@ -713,7 +748,11 @@ function openModal(ds) {
   const namesEl = document.getElementById('modalNames');
   const namesWrap = document.getElementById('modalNamesWrap');
   if (reqs.length) {
-    namesEl.innerHTML = reqs.map(r => `<span class="modal-name-chip">${r.staff_name}</span>`).join('');
+    namesEl.innerHTML = reqs.map(r => {
+      const so = getStaffObj(r.staff_name);
+      const [bg,fg] = staffColor(so);
+      return `<span class="modal-name-chip" style="background:${bg};color:${fg}">${r.staff_name}</span>`;
+    }).join('');
     namesWrap.style.display = '';
   } else {
     namesWrap.style.display = 'none';
@@ -952,7 +991,13 @@ function renderAdmin() {
   h+=`<div class="alert alert-info" style="font-size:12px">登録したスタッフは全月共通で使用されます。</div>`;
   h+='<div class="card">';
   h+=`<div style="display:flex;gap:8px;margin-bottom:6px"><input id="newStaff" type="text" placeholder="スタッフ名" style="flex:1"><input id="newStaffLimit" type="number" min="1" placeholder="上限日数" style="width:80px" title="月の勤務上限日数（空欄=無制限）"></div>`;
-  h+=`<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><span style="font-size:11px;color:#7a8299">月の勤務上限日数（空欄で無制限）</span></div>`;
+  h+=`<div style="margin-bottom:8px"><div style="font-size:11px;color:#7a8299;margin-bottom:5px">カラーを選択</div><div style="display:flex;flex-wrap:wrap;gap:5px" id="colorPicker">`;
+  STAFF_COLORS.forEach(([bg,fg,label],i)=>{
+    h+=`<div onclick="selectColor(${i})" id="colorOpt${i}" title="${label}" style="width:26px;height:26px;border-radius:50%;background:${bg};border:2px solid ${fg};cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:10px;color:${fg};font-weight:700;transition:transform .1s"></div>`;
+  });
+  h+=`</div></div>`;
+  h+=`<input type="hidden" id="newStaffColor" value="${STAFF_COLORS[0][0]}">`;
+  h+=`<div style="font-size:11px;color:#7a8299;margin-bottom:6px">月の勤務上限日数（空欄で無制限）</div>`;
   h+=`<button class="btn btn-primary btn-sm btn-full" style="margin-top:0" onclick="doAddStaff()">スタッフを追加</button>`;
   h+='<div style="margin-top:10px">';
   if(!data.staffs.length) h+='<div class="empty-state" style="padding:12px 0">スタッフがいません</div>';
@@ -964,12 +1009,14 @@ function renderAdmin() {
     const limBadge=lim!==null
       ?`<span style="font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px;background:${over?'#fee2e2':'#f0fdf4'};color:${over?'#991b1b':'#166534'}">${used}/${lim}日</span>`
       :`<span style="font-size:10px;color:#9099b4">上限なし</span>`;
+    const [sBg,sFg]=staffColor(s);
     h+=`<div class="staff-row">
-      <div class="avatar">${s.name[0]}</div>
+      <div class="avatar" style="background:${sBg};color:${sFg}">${s.name[0]}</div>
       <div style="flex:1">
         <div style="font-size:14px;font-weight:500">${s.name}</div>
         <div style="display:flex;align-items:center;gap:6px;margin-top:2px">${limBadge}</div>
       </div>
+      <button class="btn btn-secondary btn-xs" onclick="doEditStaffColor('${s.id}','${s.name}','${s.color||''}')">色</button>
       <button class="btn btn-secondary btn-xs" onclick="doEditStaffLimit('${s.id}','${s.name}',${lim===null?'null':lim})">編集</button>
       <button class="btn btn-danger btn-xs" onclick="doDelStaff('${s.id}','${s.name}')">削除</button>
     </div>`;
@@ -1057,11 +1104,73 @@ async function doAddStaff() {
   const limitVal=document.getElementById('newStaffLimit').value.trim();
   const monthly_limit=limitVal&&parseInt(limitVal)>0?parseInt(limitVal):null;
   showLoad('追加中...');
-  const {error}=await sb.from('staffs').insert([{id:uid(),store_id:storeId,name,monthly_limit}]);
+  const color=document.getElementById('newStaffColor').value||null;
+  const {error}=await sb.from('staffs').insert([{id:uid(),store_id:storeId,name,monthly_limit,color}]);
   hideLoad();
   if(error){showToast(error.code==='23505'?'同じ名前のスタッフが既に存在します':'エラー: '+error.message);return;}
   await loadData(); renderStaffDrop(); renderAdmin();
   showToast(name+(monthly_limit?` を追加しました（上限${monthly_limit}日）`:' を追加しました'));
+}
+
+function selectColor(idx) {
+  document.getElementById('newStaffColor').value = STAFF_COLORS[idx][0];
+  STAFF_COLORS.forEach(([bg,fg],i) => {
+    const el = document.getElementById('colorOpt'+i);
+    if (!el) return;
+    el.style.transform = i===idx ? 'scale(1.3)' : 'scale(1)';
+    el.style.boxShadow = i===idx ? `0 0 0 2px #fff, 0 0 0 4px ${fg}` : 'none';
+  });
+}
+
+async function doEditStaffColor(id, name, currentColor) {
+  // カラーピッカーモーダルの代わりにadminパネル内に色変更UIを出す
+  const idx = STAFF_COLORS.findIndex(([bg]) => bg === currentColor);
+  const chosen = await showColorPicker(name, idx === -1 ? 0 : idx);
+  if (chosen === null) return;
+  showLoad('更新中...');
+  await sb.from('staffs').update({color: STAFF_COLORS[chosen][0]}).eq('id', id);
+  await loadData(); hideLoad(); renderAdmin(); renderCal();
+  showToast(`${name} の色を変更しました`);
+}
+
+function showColorPicker(name, defaultIdx) {
+  return new Promise(resolve => {
+    // モーダルオーバーレイを使って色選択UI表示
+    const overlay = document.getElementById('modalOverlay');
+    const sheet = document.getElementById('modalSheet');
+    let selected = defaultIdx;
+    sheet.innerHTML = `
+      <div class="modal-handle"></div>
+      <div class="modal-date">${name} の色を選択</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin:16px 0;justify-content:center" id="cpGrid">
+        ${STAFF_COLORS.map(([bg,fg,label],i) => `
+          <div onclick="cpSelect(${i})" id="cp${i}" title="${label}"
+            style="width:44px;height:44px;border-radius:50%;background:${bg};border:3px solid ${i===defaultIdx?fg:'transparent'};cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:${fg};box-shadow:${i===defaultIdx?`0 0 0 2px #fff,0 0 0 4px ${fg}`:'none'};transition:all .15s">
+            ${String.fromCodePoint(0x2460+i)}
+          </div>`).join('')}
+      </div>
+      <div style="font-size:12px;color:#7a8299;text-align:center;margin-bottom:14px" id="cpLabel">${STAFF_COLORS[defaultIdx][2]}</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-secondary" style="flex:1;margin-top:0" onclick="cpCancel()">キャンセル</button>
+        <button class="btn btn-primary" style="flex:1;margin-top:0" onclick="cpConfirm()">決定</button>
+      </div>`;
+    overlay.classList.add('show');
+    window._cpSelected = selected;
+    window.cpSelect = (i) => {
+      window._cpSelected = i;
+      STAFF_COLORS.forEach(([bg,fg],j) => {
+        const el = document.getElementById('cp'+j);
+        if (el) {
+          el.style.border = `3px solid ${j===i?fg:'transparent'}`;
+          el.style.boxShadow = j===i?`0 0 0 2px #fff, 0 0 0 4px ${fg}`:'none';
+        }
+      });
+      const lbl = document.getElementById('cpLabel');
+      if (lbl) lbl.textContent = STAFF_COLORS[i][2];
+    };
+    window.cpConfirm = () => { overlay.classList.remove('show'); resolve(window._cpSelected); };
+    window.cpCancel = () => { overlay.classList.remove('show'); resolve(null); };
+  });
 }
 
 async function doEditStaffLimit(id, name, currentLimit) {
