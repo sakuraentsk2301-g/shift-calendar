@@ -191,9 +191,9 @@ alter table shift_requests disable row level security;</div>
         <svg width="34" height="34" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
       </div>
       <div style="font-size:20px;font-weight:700;margin-bottom:6px">シフトカレンダー</div>
-      <div style="font-size:13px;color:#7a8299">店舗ごとのシフト希望管理・共有ツール</div>
+      <div style="font-size:13px;color:#7a8299">ユニットごとのシフト希望管理・共有ツール</div>
     </div>
-    <button class="btn btn-primary btn-full" onclick="showPage('pgCreate')">＋ 新しい店舗を作成</button>
+    <button class="btn btn-primary btn-full" onclick="showPage('pgCreate')">＋ 新しいユニットを作成</button>
     <div class="divider"></div>
     <div class="sec">URLで参加</div>
     <div class="card">
@@ -202,15 +202,15 @@ alter table shift_requests disable row level security;</div>
       <button class="btn btn-secondary btn-full" onclick="doJoin()">参加する</button>
     </div>
     <div class="divider"></div>
-    <div class="sec">最近の店舗</div>
-    <div id="recentList"><div class="empty-state">まだ店舗がありません</div></div>
+    <div class="sec">最近のユニット</div>
+    <div id="recentList"><div class="empty-state">まだユニットがありません</div></div>
     <div class="divider"></div>
     <div class="sec">URLを紛失した場合</div>
     <div class="card">
       <div class="alert alert-info" style="font-size:12px;margin-bottom:10px">
-        Supabase Dashboard → Table Editor → <strong>stores</strong> テーブルを開き、対象店舗の <strong>id</strong> 列の値をコピーして入力してください。
+        Supabase Dashboard → Table Editor → <strong>stores</strong> テーブルを開き、対象ユニットの <strong>id</strong> 列の値をコピーして入力してください。
       </div>
-      <label>店舗ID（Supabase の stores テーブルの id）</label>
+      <label>ユニットID（Supabase の stores テーブルの id）</label>
       <input id="recoveryStoreId" type="text" placeholder="例：abc123xyz">
       <div style="display:flex;gap:8px;margin-top:10px">
         <button class="btn btn-primary" style="flex:1;margin-top:0" onclick="doRecoverUrl('admin')">👑 管理者URLを復元</button>
@@ -237,17 +237,17 @@ alter table shift_requests disable row level security;</div>
 
   <!-- CREATE STORE -->
   <div class="page" id="pgCreate">
-    <div class="sec">新しい店舗を作成</div>
+    <div class="sec">新しいユニットを作成</div>
     <div class="card">
-      <label>店舗名</label>
+      <label>ユニット名</label>
       <input id="newStoreName" type="text" placeholder="例：カフェ〇〇 渋谷店">
     </div>
-    <button class="btn btn-primary btn-full" onclick="doCreateStore()">店舗を作成する</button>
+    <button class="btn btn-primary btn-full" onclick="doCreateStore()">ユニットを作成する</button>
   </div>
 
   <!-- STORE CREATED -->
   <div class="page" id="pgCreated">
-    <div class="alert alert-ok">✅ 店舗が作成されました！</div>
+    <div class="alert alert-ok">✅ ユニットが作成されました！</div>
     <div class="alert alert-warn">⚠ URLを必ず保存してください。このページを閉じると再表示できません。</div>
     <div class="card">
       <div class="url-wrap">
@@ -391,8 +391,8 @@ function showPage(id) {
   const badge = document.getElementById('topbarBadge');
   if (id === 'pgHome') { back.style.display='none'; title.textContent='シフトカレンダー'; badge.style.display='none'; }
   else if (id === 'pgSetup') { back.style.display='none'; title.textContent='Supabase設定'; badge.style.display='none'; }
-  else if (id === 'pgCreate') { back.style.display=''; title.textContent='店舗を作成'; }
-  else if (id === 'pgCreated') { back.style.display=''; title.textContent='店舗が作成されました'; }
+  else if (id === 'pgCreate') { back.style.display=''; title.textContent='ユニットを作成'; }
+  else if (id === 'pgCreated') { back.style.display=''; title.textContent='ユニットが作成されました'; }
 }
 
 function goBack() {
@@ -462,7 +462,7 @@ function addRecent(id, name, r, vt) {
 function renderRecent() {
   const list = getRecent();
   const el = document.getElementById('recentList');
-  if (!list.length) { el.innerHTML='<div class="empty-state">まだ店舗がありません</div>'; return; }
+  if (!list.length) { el.innerHTML='<div class="empty-state">まだユニットがありません</div>'; return; }
   el.innerHTML = list.map(s=>{
     const delBtn = s.role==='admin'
       ? `<button class="btn btn-danger btn-xs" style="flex-shrink:0" onclick="event.stopPropagation();doDeleteStoreFromHome('${s.id}','${s.name}')">削除</button>`
@@ -479,12 +479,12 @@ function renderRecent() {
 // ---- Recover URL ----
 async function doRecoverUrl(targetRole) {
   const sid = document.getElementById('recoveryStoreId').value.trim();
-  if (!sid) { showToast('店舗IDを入力してください'); return; }
-  showLoad('店舗情報を確認中...');
+  if (!sid) { showToast('ユニットIDを入力してください'); return; }
+  showLoad('ユニット情報を確認中...');
   const { data: store, error } = await sb.from('stores').select('id, name, viewer_token').eq('id', sid).single();
   hideLoad();
   if (error || !store) {
-    showToast('店舗が見つかりません。IDを確認してください');
+    showToast('ユニットが見つかりません。IDを確認してください');
     document.getElementById('recoveryResult').style.display = 'none';
     return;
   }
@@ -521,7 +521,7 @@ function doJoin() {
 // ---- Create ----
 async function doCreateStore() {
   const name = document.getElementById('newStoreName').value.trim();
-  if (!name) { showToast('店舗名を入力してください'); return; }
+  if (!name) { showToast('ユニット名を入力してください'); return; }
   showLoad('作成中...');
   const id=uid(), vt=uid();
   const {error} = await sb.from('stores').insert([{id, name, viewer_token:vt}]);
@@ -545,7 +545,7 @@ async function doEnter(sid, r, vt) {
   showLoad('読み込み中...');
   const {data:store, error} = await sb.from('stores').select('*').eq('id', sid).single();
   hideLoad();
-  if (error || !store) { showToast('店舗が見つかりません'); return; }
+  if (error || !store) { showToast('ユニットが見つかりません'); return; }
   if (r==='viewer' && vt && store.viewer_token !== vt) { showToast('URLが無効です'); return; }
   storeId=sid; role=r; viewerToken=vt;
   addRecent(sid, store.name, r, vt);
@@ -1080,11 +1080,11 @@ function renderAdmin() {
   h+=`<div class="url-wrap" style="margin-top:10px"><div class="url-label">👤 閲覧・入力URL</div><div class="url-box" id="viewerUrlBox">読み込み中...</div><button class="copy-btn" onclick="copyEl('viewerUrlBox')">コピー</button></div>`;
   h+='</div>';
 
-  // ホームへ戻る・店舗削除
+  // ホームへ戻る・ユニット削除
   h+=`<div class="divider"></div>`;
   h+=`<button class="btn btn-secondary btn-full" style="margin-top:0" onclick="goHomeFromCal()">🏠 シフトカレンダーホームへ戻る</button>`;
-  h+=`<button class="btn btn-danger btn-full" style="margin-top:8px" onclick="doDeleteStore()">🗑 この店舗を削除する</button>`;
-  h+=`<div style="font-size:11px;color:#9099b4;margin-top:6px;text-align:center">店舗を削除すると全データが完全に削除されます</div>`;
+  h+=`<button class="btn btn-danger btn-full" style="margin-top:8px" onclick="doDeleteStore()">🗑 このユニットを削除する</button>`;
+  h+=`<div style="font-size:11px;color:#9099b4;margin-top:6px;text-align:center">ユニットを削除すると全データが完全に削除されます</div>`;
 
   el.innerHTML=h;
 
@@ -1248,13 +1248,13 @@ function goHomeFromCal() {
 async function doDeleteStoreFromHome(sid, sname) {
   if (!confirm(`「${sname}」を削除しますか？\n\nスタッフ・シフト希望・勤務人数設定など全データが完全に削除されます。この操作は取り消せません。`)) return;
   if (!confirm(`本当に削除しますか？\n「${sname}」のデータはすべて失われます。`)) return;
-  showLoad('店舗を削除中...');
+  showLoad('ユニットを削除中...');
   const { error } = await sb.from('stores').delete().eq('id', sid);
   hideLoad();
   if (error) { showToast('エラー: ' + error.message); return; }
   const recent = getRecent().filter(s => s.id !== sid);
   localStorage.setItem(K_RECENT, JSON.stringify(recent));
-  showToast('店舗を削除しました');
+  showToast('ユニットを削除しました');
   renderRecent();
 }
 
@@ -1262,16 +1262,16 @@ async function doDeleteStore() {
   const storeName = document.getElementById('topbarTitle').textContent;
   if (!confirm(`「${storeName}」を削除しますか？\n\nスタッフ・シフト希望・勤務人数設定など全データが完全に削除されます。この操作は取り消せません。`)) return;
   if (!confirm(`本当に削除しますか？\n「${storeName}」のデータはすべて失われます。`)) return;
-  showLoad('店舗を削除中...');
+  showLoad('ユニットを削除中...');
   // ON DELETE CASCADE で関連データも自動削除
   const { error } = await sb.from('stores').delete().eq('id', storeId);
   hideLoad();
   if (error) { showToast('エラー: ' + error.message); return; }
-  // 最近の店舗リストからも削除
+  // 最近のユニットリストからも削除
   const recent = getRecent().filter(s => s.id !== storeId);
   localStorage.setItem(K_RECENT, JSON.stringify(recent));
   storeId = null;
-  showToast('店舗を削除しました');
+  showToast('ユニットを削除しました');
   showPage('pgHome');
   renderRecent();
 }
