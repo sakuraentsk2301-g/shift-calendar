@@ -241,6 +241,7 @@ alter table shift_requests disable row level security;</div>
     <div class="card">
       <label>ユニット名</label>
       <input id="newStoreName" type="text" placeholder="例：グループホーム〇〇">
+      <div class="alert alert-err" id="createStoreErr" style="display:none;margin-top:10px"></div>
     </div>
     <button class="btn btn-primary btn-full" onclick="doCreateStore()">ユニットを作成する</button>
   </div>
@@ -522,12 +523,23 @@ function doJoin() {
 // ---- Create ----
 async function doCreateStore() {
   const name = document.getElementById('newStoreName').value.trim();
-  if (!name) { showToast('ユニット名を入力してください'); return; }
+  const errEl = document.getElementById('createStoreErr');
+  errEl.style.display = 'none';
+  if (!name) { errEl.textContent = 'ユニット名を入力してください'; errEl.style.display = ''; return; }
+  showLoad('確認中...');
+  // 同じ名前のユニットが既に存在しないかチェック
+  const { data: existing } = await sb.from('stores').select('id').eq('name', name);
+  if (existing && existing.length > 0) {
+    hideLoad();
+    errEl.textContent = `「${name}」は既に存在します。別のユニット名を入力してください。`;
+    errEl.style.display = '';
+    return;
+  }
   showLoad('作成中...');
   const id=uid(), vt=uid();
   const {error} = await sb.from('stores').insert([{id, name, viewer_token:vt}]);
   hideLoad();
-  if (error) { showToast('エラー: '+error.message); return; }
+  if (error) { errEl.textContent = 'エラー: '+error.message; errEl.style.display = ''; return; }
   createdId=id; createdVToken=vt;
   addRecent(id, name, 'admin', '');
   const base = location.href.split('?')[0];
