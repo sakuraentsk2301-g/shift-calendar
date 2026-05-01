@@ -240,7 +240,7 @@ alter table shift_requests disable row level security;</div>
     <div class="sec">新しいユニットを作成</div>
     <div class="card">
       <label>ユニット名</label>
-      <input id="newStoreName" type="text" placeholder="例：天文館〇号館">
+      <input id="newStoreName" type="text" placeholder="例：グループホーム〇〇">
     </div>
     <button class="btn btn-primary btn-full" onclick="doCreateStore()">ユニットを作成する</button>
   </div>
@@ -350,6 +350,7 @@ let storeId = null, role = 'viewer', viewerToken = null;
 let calY = new Date().getFullYear(), calM = new Date().getMonth();
 let selDate = null, curTab = 'input';
 let data = {staffs:[], requests:[], caps:[]};
+let allRequests = []; // 全ユニットの出勤希望（重複チェック・合算用）
 let createdId = null, createdVToken = null;
 
 const K_URL = 'sft2_url', K_KEY = 'sft2_key', K_RECENT = 'sft2_recent';
@@ -568,12 +569,14 @@ async function doEnter(sid, r, vt) {
 
 // ---- Load data ----
 async function loadData() {
-  const [s,rq,cp] = await Promise.all([
+  const [s,rq,cp,allRq] = await Promise.all([
     sb.from('staffs').select('*').eq('store_id',storeId).order('created_at'),
     sb.from('shift_requests').select('*').eq('store_id',storeId),
-    sb.from('daily_capacities').select('*').eq('store_id',storeId)
+    sb.from('daily_capacities').select('*').eq('store_id',storeId),
+    sb.from('shift_requests').select('store_id,staff_name,date,type') // 全ユニット
   ]);
   data.staffs=s.data||[]; data.requests=rq.data||[]; data.caps=cp.data||[];
+  allRequests=allRq.data||[];
 }
 
 // ---- Calendar ----
@@ -657,14 +660,19 @@ function renderSummary() {
   }
   if (week.length > 0) weeks.push(week);
 
-  // 当月の出勤希望
+  // 当月の出勤希望（このユニット分）
   const monthReqs = data.requests.filter(r => r.type === 'work' && r.date.startsWith(monthPfx));
   const monthTotal = monthReqs.length;
 
-  // スタッフごとの当月合計
+  // スタッフごとの当月合計（全ユニット合算）
   const staffTotals = {};
-  monthReqs.forEach(r => { staffTotals[r.staff_name] = (staffTotals[r.staff_name]||0) + 1; });
-  const staffSorted = Object.entries(staffTotals).sort((a,b) => b[1]-a[1]);
+  const allMonthReqs = allRequests.filter(r => r.type === 'work' && r.date.startsWith(monthPfx));
+  allMonthReqs.forEach(r => { staffTotals[r.staff_name] = (staffTotals[r.staff_name]||0) + 1; });
+  // このユニットのスタッフのみ表示対象に絞る
+  const myStaffNames = data.staffs.map(s => s.name);
+  const staffSorted = Object.entries(staffTotals)
+    .filter(([n]) => myStaffNames.includes(n))
+    .sort((a,b) => b[1]-a[1]);
 
   let html = '';
 
@@ -708,7 +716,7 @@ function renderSummary() {
     : '';
   html += `<div class="month-summary" style="flex-direction:column;align-items:flex-start;gap:6px">
     <div style="display:flex;align-items:center;justify-content:space-between;width:100%">
-      <span class="month-summary-label">${calY}年${MN[calM]} 月間合計</span>
+      <span class="month-summary-label">${calY}年${MN[calM]} 月間合計（全ユニット合算）</span>
       <span class="month-summary-val">${monthTotal} 件</span>
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:4px">${staffMonthStr}</div>
@@ -789,7 +797,7 @@ function openModal(ds) {
     const sel = document.getElementById('modalStaffSel');
     sel.innerHTML = '<option value="">-- スタッフを選択 --</option>' +
       available.map(s => {
-        const used=data.requests.filter(r=>r.type==='work'&&r.staff_name===s.name&&r.date.startsWith(monthPfxM)).length;
+        const used=allRequests.filter(r=>r.type==='work'&&r.staff_name===s.name&&r.date.startsWith(monthPfxM)).length;
         const limInfo=s.monthly_limit!==null?` (今月${used}/${s.monthly_limit}日)`:'';
         return `<option value="${s.name}">${s.name}${limInfo}</option>`;
       }).join('');
@@ -824,7 +832,26 @@ async function doModalSubmit() {
   err.style.display = 'none';
   if (!staff) { err.textContent = 'スタッフ名を選択してください'; err.style.display = ''; return; }
 
-  // 上限再チェック
+  // 全ユニット横断で同一スタッフ・同一日の重複チェック
+  const alreadyOtherStore = allRequests.find(r =>
+    r.staff_name === staff && r.date === selDate && r.type === 'work' &&
+    r.store_id !== storeId
+  );
+  if (alreadyOtherStore) {
+    err.textContent = `${staff} はすでに別のユニットでこの日に出勤希望を登録しています。`;
+    err.style.display = ''; return;
+  }
+  // 月の上限チェック（全ユニット合算）
+  const staffObj2 = data.staffs.find(s => s.name === staff);
+  if (staffObj2 && staffObj2.monthly_limit !== null) {
+    const monthPfxC = selDate.slice(0,7);
+    const usedAll = allRequests.filter(r=>r.type==='work'&&r.staff_name===staff&&r.date.startsWith(monthPfxC)).length;
+    if (usedAll >= staffObj2.monthly_limit) {
+      err.textContent = `${staff} は今月の勤務上限（${staffObj2.monthly_limit}日）に達しています（全ユニット合算）。`;
+      err.style.display = ''; return;
+    }
+  }
+  // このユニットの上限チェック
   const capObj = data.caps.find(c => c.date === selDate);
   if (capObj) {
     const wc = data.requests.filter(r => r.date === selDate && r.type === 'work').length;
@@ -887,14 +914,29 @@ async function doSubmit() {
   if(!selDate){showToast('日付を選択してください');return;}
   if(!staff){err.textContent='スタッフ名を選択してください';err.style.display='';return;}
 
-  // 上限チェック
+  // 全ユニット横断で同一スタッフ・同一日の重複チェック
+  const alreadyOther = allRequests.find(r=>r.staff_name===staff&&r.date===selDate&&r.type==='work'&&r.store_id!==storeId);
+  if(alreadyOther){
+    err.textContent=`${staff} はすでに別のユニットでこの日に出勤希望を登録しています。`;
+    err.style.display=''; return;
+  }
+  // 月の上限チェック（全ユニット合算）
+  const staffObjS = data.staffs.find(s=>s.name===staff);
+  if(staffObjS&&staffObjS.monthly_limit!==null){
+    const mPfx=selDate.slice(0,7);
+    const usedAllS=allRequests.filter(r=>r.type==='work'&&r.staff_name===staff&&r.date.startsWith(mPfx)).length;
+    if(usedAllS>=staffObjS.monthly_limit){
+      err.textContent=`${staff} は今月の勤務上限（${staffObjS.monthly_limit}日）に達しています（全ユニット合算）。`;
+      err.style.display=''; return;
+    }
+  }
+  // このユニットの勤務可能人数チェック
   const capObj=data.caps.find(c=>c.date===selDate);
   if(capObj){
     const wc=data.requests.filter(r=>r.date===selDate&&r.type==='work').length;
     if(wc>=capObj.capacity){
       err.textContent=`勤務可能人数（${capObj.capacity}人）を超えています。この日は登録できません。`;
-      err.style.display='';
-      return;
+      err.style.display=''; return;
     }
   }
 
@@ -911,16 +953,16 @@ async function doSubmit() {
 }
 
 function getAvailableStaffs(dateStr) {
-  // その日に登録済みのスタッフを除外
+  // その日に全ユニットで登録済みのスタッフを除外（横断重複チェック）
   const registeredToday = dateStr
-    ? data.requests.filter(r=>r.date===dateStr&&r.type==='work').map(r=>r.staff_name)
+    ? allRequests.filter(r=>r.date===dateStr&&r.type==='work').map(r=>r.staff_name)
     : [];
-  // 月の上限に達したスタッフを除外
+  // 月の上限に達したスタッフを除外（全ユニット合算）
   const monthPfx = dateStr ? dateStr.slice(0,7) : `${calY}-${p2(calM+1)}`;
   return data.staffs.filter(s => {
     if (registeredToday.includes(s.name)) return false;
     if (s.monthly_limit !== null) {
-      const used = data.requests.filter(r=>r.type==='work'&&r.staff_name===s.name&&r.date.startsWith(monthPfx)).length;
+      const used = allRequests.filter(r=>r.type==='work'&&r.staff_name===s.name&&r.date.startsWith(monthPfx)).length;
       if (used >= s.monthly_limit) return false;
     }
     return true;
@@ -932,7 +974,7 @@ function renderStaffDrop() {
   const available = getAvailableStaffs(selDate);
   sel.innerHTML='<option value="">-- 選択してください --</option>'+available.map(s=>{
     const monthPfx=selDate?selDate.slice(0,7):`${calY}-${p2(calM+1)}`;
-    const used=data.requests.filter(r=>r.type==='work'&&r.staff_name===s.name&&r.date.startsWith(monthPfx)).length;
+    const used=allRequests.filter(r=>r.type==='work'&&r.staff_name===s.name&&r.date.startsWith(monthPfx)).length;
     const limInfo=s.monthly_limit!==null?` (今月${used}/${s.monthly_limit}日)`:'';
     return `<option value="${s.name}">${s.name}${limInfo}</option>`;
   }).join('');
@@ -1003,7 +1045,7 @@ function renderAdmin() {
   if(!data.staffs.length) h+='<div class="empty-state" style="padding:12px 0">スタッフがいません</div>';
   const monthPfxS=`${calY}-${p2(calM+1)}`;
   data.staffs.forEach(s=>{
-    const used=data.requests.filter(r=>r.type==='work'&&r.staff_name===s.name&&r.date.startsWith(monthPfxS)).length;
+    const used=allRequests.filter(r=>r.type==='work'&&r.staff_name===s.name&&r.date.startsWith(monthPfxS)).length;
     const lim=s.monthly_limit;
     const over=lim!==null&&used>=lim;
     const limBadge=lim!==null
