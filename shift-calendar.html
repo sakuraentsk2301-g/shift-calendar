@@ -352,6 +352,7 @@ let calY = new Date().getFullYear(), calM = new Date().getMonth();
 let selDate = null, curTab = 'input';
 let data = {staffs:[], requests:[], caps:[]};
 let allRequests = []; // 全ユニットの出勤希望（重複チェック・合算用）
+let allStores = [];   // 全ユニット情報（名前の取得用）
 let createdId = null, createdVToken = null;
 
 const K_URL = 'sft2_url', K_KEY = 'sft2_key', K_RECENT = 'sft2_recent';
@@ -581,14 +582,16 @@ async function doEnter(sid, r, vt) {
 
 // ---- Load data ----
 async function loadData() {
-  const [s,rq,cp,allRq] = await Promise.all([
+  const [s,rq,cp,allRq,stores] = await Promise.all([
     sb.from('staffs').select('*').eq('store_id',storeId).order('created_at'),
     sb.from('shift_requests').select('*').eq('store_id',storeId),
     sb.from('daily_capacities').select('*').eq('store_id',storeId),
-    sb.from('shift_requests').select('store_id,staff_name,date,type') // 全ユニット
+    sb.from('shift_requests').select('store_id,staff_name,date,type'), // 全ユニット
+    sb.from('stores').select('id,name') // ユニット名取得用
   ]);
   data.staffs=s.data||[]; data.requests=rq.data||[]; data.caps=cp.data||[];
   allRequests=allRq.data||[];
+  allStores=stores.data||[];
 }
 
 // ---- Calendar ----
@@ -716,7 +719,7 @@ function renderSummary() {
     </div>`;
   });
 
-  // 当月合計バー
+  // 当月合計バー（全ユニット合算）
   const staffMonthStr = staffSorted.length
     ? staffSorted.map(([n,cnt]) => {
         const so=getStaffObj(n); const [bg,fg]=staffColor(so);
@@ -733,6 +736,53 @@ function renderSummary() {
     </div>
     <div style="display:flex;flex-wrap:wrap;gap:4px">${staffMonthStr}</div>
   </div>`;
+
+  // ユニット別内訳
+  const otherStores = allStores.filter(s => s.id !== storeId);
+  if (otherStores.length > 0 && myStaffNames.length > 0) {
+    // 現在のユニット
+    const thisUnitReqs = data.requests.filter(r => r.type==='work' && r.date.startsWith(monthPfx));
+    const thisUnitTotals = {};
+    thisUnitReqs.forEach(r => { thisUnitTotals[r.staff_name] = (thisUnitTotals[r.staff_name]||0) + 1; });
+
+    // 各ユニット別にスタッフの勤務日数を集計
+    const unitRows = [
+      { name: document.getElementById('topbarTitle').textContent.replace(/\s*(管理者|閲覧者).*/, '').trim(), totals: thisUnitTotals, isThis: true },
+      ...otherStores.map(s => {
+        const reqs = allRequests.filter(r => r.store_id===s.id && r.type==='work' && r.date.startsWith(monthPfx));
+        const totals = {};
+        reqs.forEach(r => {
+          if (myStaffNames.includes(r.staff_name)) {
+            totals[r.staff_name] = (totals[r.staff_name]||0) + 1;
+          }
+        });
+        return { name: s.name, totals, isThis: false };
+      }).filter(u => Object.keys(u.totals).length > 0)
+    ];
+
+    html += `<div style="margin-top:6px;background:#f5f7fc;border:1px solid #e8eaf0;border-radius:10px;padding:12px">`;
+    html += `<div style="font-size:11px;font-weight:700;letter-spacing:.06em;color:#7a8299;text-transform:uppercase;margin-bottom:8px">ユニット別内訳</div>`;
+    unitRows.forEach(unit => {
+      const staffEntries = Object.entries(unit.totals)
+        .filter(([n]) => myStaffNames.includes(n))
+        .sort((a,b) => b[1]-a[1]);
+      const chipsHtml = staffEntries.length
+        ? staffEntries.map(([n,cnt]) => {
+            const so=getStaffObj(n); const [bg,fg]=staffColor(so);
+            return `<span style="background:${bg};color:${fg};padding:1px 6px;border-radius:4px;font-size:11px;font-weight:600">${n} ${cnt}日</span>`;
+          }).join(' ')
+        : `<span style="font-size:11px;color:#9099b4">なし</span>`;
+      const unitTotal = staffEntries.reduce((s,[,c])=>s+c, 0);
+      html += `<div style="padding:6px 0;border-bottom:1px solid #eef0f8">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+          <span style="font-size:12px;font-weight:600;color:${unit.isThis?'#0f1f45':'#374151'}">${unit.isThis?'▶ ':''} ${unit.name}</span>
+          <span style="font-size:11px;color:#7a8299">${unitTotal}件</span>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:3px">${chipsHtml}</div>
+      </div>`;
+    });
+    html += `</div>`;
+  }
 
   document.getElementById('summaryArea').innerHTML = html;
 }
