@@ -110,6 +110,15 @@ input:focus,select:focus{border-color:#3b6ef8;box-shadow:0 0 0 3px rgba(59,110,2
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 .setup-code{background:#f1f5f9;border-radius:6px;padding:10px 12px;font-family:monospace;font-size:11px;color:#334155;margin-top:8px;line-height:1.7;overflow-x:auto;white-space:pre}
 
+/* 複数日選択モード */
+.multi-mode-bar{display:flex;align-items:center;gap:8px;margin-bottom:10px;padding:8px 12px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;font-size:12px;color:#92400e}
+.multi-toggle{background:none;border:1.5px solid #f59e0b;border-radius:6px;padding:4px 10px;font-size:12px;font-weight:600;color:#92400e;cursor:pointer;font-family:inherit}
+.multi-toggle.on{background:#f59e0b;color:#fff;border-color:#f59e0b}
+.cal-cell.multi-sel{background:#fef9c3!important;border-color:#f59e0b!important;box-shadow:inset 0 0 0 2px #f59e0b}
+.cal-cell.multi-sel .dnum{background:#f59e0b;color:#fff!important;border-radius:50%}
+.multi-count-bar{background:#0f1f45;color:#fff;border-radius:8px;padding:10px 14px;font-size:13px;font-weight:600;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between}
+.multi-clear-btn{background:rgba(255,255,255,0.2);border:none;border-radius:5px;color:#fff;font-size:11px;padding:3px 8px;cursor:pointer;font-family:inherit}
+
 /* 日付モーダル */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:200;display:none;align-items:flex-end;justify-content:center}
 .modal-overlay.show{display:flex}
@@ -276,6 +285,12 @@ alter table shift_requests disable row level security;</div>
       <div><span class="cal-month" id="calMonthLbl"></span><span class="cal-year" id="calYearLbl"></span></div>
       <button class="cal-nav-btn" onclick="changeMonth(1)">›</button>
     </div>
+    <div style="text-align:right;margin-bottom:8px">
+      <button class="multi-toggle" id="multiToggleBtn" onclick="toggleMultiMode()">📅 複数日選択</button>
+    </div>
+    <div class="multi-mode-bar" id="multiModeBar" style="display:none">
+      📅 日付をタップして複数選択できます。選択後にスタッフを選んで一括登録してください。
+    </div>
     <div class="cal-dow-row">
       <div class="cal-dow sun">日</div><div class="cal-dow">月</div><div class="cal-dow">火</div>
       <div class="cal-dow">水</div><div class="cal-dow">木</div><div class="cal-dow">金</div>
@@ -292,14 +307,32 @@ alter table shift_requests disable row level security;</div>
 
     <!-- 希望入力パネル -->
     <div id="panInput">
-      <div class="date-banner" id="dateBanner"></div>
-      <div class="hint" id="dateHint">⬆ 日付をタップして出勤希望を入力</div>
-      <div id="inputForm" style="display:none">
-        <div id="capStatus" style="margin-bottom:10px"></div>
-        <label>スタッフ名を選択</label>
-        <select id="staffSel"><option value="">-- 選択してください --</option></select>
-        <div class="alert alert-err" id="inputErr" style="display:none;margin-top:10px"></div>
-        <button class="btn btn-primary btn-full" onclick="doSubmit()">出勤希望を登録する</button>
+      <!-- 通常モード -->
+      <div id="singleModePanel">
+        <div class="date-banner" id="dateBanner"></div>
+        <div class="hint" id="dateHint">⬆ 日付をタップして出勤希望を入力</div>
+        <div id="inputForm" style="display:none">
+          <div id="capStatus" style="margin-bottom:10px"></div>
+          <label>スタッフ名を選択</label>
+          <select id="staffSel"><option value="">-- 選択してください --</option></select>
+          <div class="alert alert-err" id="inputErr" style="display:none;margin-top:10px"></div>
+          <button class="btn btn-primary btn-full" onclick="doSubmit()">出勤希望を登録する</button>
+        </div>
+      </div>
+      <!-- 複数日選択モード -->
+      <div id="multiModePanel" style="display:none">
+        <div class="hint">📅 カレンダーの日付を複数タップして選択してください</div>
+        <div id="multiCountBar" style="display:none" class="multi-count-bar">
+          <span id="multiCountLabel">0日 選択中</span>
+          <button class="multi-clear-btn" onclick="clearMultiSelect()">✕ 選択解除</button>
+        </div>
+        <div id="multiInputForm" style="display:none">
+          <label>スタッフ名を選択</label>
+          <select id="multiStaffSel"><option value="">-- 選択してください --</option></select>
+          <div class="alert alert-err" id="multiErr" style="display:none;margin-top:10px"></div>
+          <div class="alert alert-info" id="multiResult" style="display:none;margin-top:10px"></div>
+          <button class="btn btn-primary btn-full" onclick="doMultiSubmit()">選択した日にまとめて登録する</button>
+        </div>
       </div>
     </div>
 
@@ -353,6 +386,8 @@ let selDate = null, curTab = 'input';
 let data = {staffs:[], requests:[], caps:[]};
 let allRequests = []; // 全ユニットの出勤希望（重複チェック・合算用）
 let allStores = [];   // 全ユニット情報（名前の取得用）
+let multiMode = false;       // 複数日選択モード
+let selectedDates = new Set(); // 選択中の日付セット
 let createdId = null, createdVToken = null;
 
 const K_URL = 'sft2_url', K_KEY = 'sft2_key', K_RECENT = 'sft2_recent';
@@ -581,29 +616,48 @@ async function doEnter(sid, r, vt) {
 }
 
 // ---- Load data ----
+// 取得する月範囲を計算（前月・当月・翌月）
+function getMonthRange() {
+  const prev = new Date(calY, calM - 1, 1);
+  const next = new Date(calY, calM + 1, 1);
+  const fmt = (y, m) => `${y}-${String(m+1).padStart(2,'0')}`;
+  return [fmt(prev.getFullYear(), prev.getMonth()), fmt(calY, calM), fmt(next.getFullYear(), next.getMonth())];
+}
+
 async function loadData() {
-  const [s,rq,cp,allRq,stores] = await Promise.all([
-    sb.from('staffs').select('*').eq('store_id',storeId).order('created_at'),
-    sb.from('shift_requests').select('*').eq('store_id',storeId),
-    sb.from('daily_capacities').select('*').eq('store_id',storeId),
-    sb.from('shift_requests').select('store_id,staff_name,date,type'), // 全ユニット
-    sb.from('stores').select('id,name') // ユニット名取得用
+  const [mPrev, mCur, mNext] = getMonthRange();
+  // このユニットのシフト希望は表示月のみ
+  // 全ユニットのシフト希望は前月〜翌月に限定（競合チェック・合算用）
+  const [s, rq, cp, allRq, stores] = await Promise.all([
+    sb.from('staffs').select('*').eq('store_id', storeId).order('created_at'),
+    sb.from('shift_requests').select('*').eq('store_id', storeId)
+      .gte('date', mCur + '-01').lte('date', mCur + '-31'),
+    sb.from('daily_capacities').select('*').eq('store_id', storeId),
+    sb.from('shift_requests').select('store_id,staff_name,date,type')
+      .gte('date', mPrev + '-01').lte('date', mNext + '-31'), // 前月〜翌月に限定
+    sb.from('stores').select('id,name')
   ]);
-  data.staffs=s.data||[]; data.requests=rq.data||[]; data.caps=cp.data||[];
-  allRequests=allRq.data||[];
-  allStores=stores.data||[];
+  data.staffs  = s.data    || [];
+  data.requests = rq.data  || [];
+  data.caps    = cp.data   || [];
+  allRequests  = allRq.data || [];
+  allStores    = stores.data || [];
 }
 
 // ---- Calendar ----
-function changeMonth(d) {
+async function changeMonth(d) {
   calM+=d;
   if(calM<0){calM=11;calY--;} if(calM>11){calM=0;calY++;}
-  renderCal();
   // 月が変わったら日付選択リセット
   selDate=null;
   document.getElementById('dateBanner').style.display='none';
   document.getElementById('dateHint').style.display='';
   document.getElementById('inputForm').style.display='none';
+  // 月移動のたびにその月のデータを再取得
+  showLoad('読み込み中...');
+  await loadData();
+  hideLoad();
+  renderCal();
   if(curTab==='list') renderList();
   if(curTab==='admin') renderAdmin();
 }
@@ -626,7 +680,8 @@ function renderCal() {
     const cls=['cal-cell',
       dow===0?'sun-cell':dow===6?'sat-cell':'',
       ds===today?'today':'',
-      ds===selDate?'sel':'',
+      (!multiMode && ds===selDate)?'sel':'',
+      (multiMode && selectedDates.has(ds))?'multi-sel':'',
       full?'full-day':''
     ].filter(Boolean).join(' ');
 
@@ -789,9 +844,20 @@ function renderSummary() {
 
 // ---- Date select ----
 function selDay(ds) {
+  if (multiMode) {
+    // 複数日選択モード：タップで選択/解除
+    if (selectedDates.has(ds)) {
+      selectedDates.delete(ds);
+    } else {
+      selectedDates.add(ds);
+    }
+    renderCal();
+    updateMultiPanel();
+    return;
+  }
+  // 通常モード
   selDate = ds;
   renderCal();
-  // 下パネルも更新
   const d = new Date(ds+'T00:00:00');
   const banner = document.getElementById('dateBanner');
   banner.textContent = `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日`;
@@ -804,6 +870,130 @@ function selDay(ds) {
   if(curTab==='list') renderList();
   if(curTab==='admin') renderAdmin();
   openModal(ds);
+}
+
+// 複数日選択モードの切り替え
+function toggleMultiMode() {
+  multiMode = !multiMode;
+  selectedDates.clear();
+  const btn = document.getElementById('multiToggleBtn');
+  const bar = document.getElementById('multiModeBar');
+  const singlePanel = document.getElementById('singleModePanel');
+  const multiPanel = document.getElementById('multiModePanel');
+  if (multiMode) {
+    btn.classList.add('on');
+    btn.textContent = '✕ 複数日選択をやめる';
+    bar.style.display = '';
+    singlePanel.style.display = 'none';
+    multiPanel.style.display = '';
+    if (curTab !== 'input') switchTab('input');
+  } else {
+    btn.classList.remove('on');
+    btn.textContent = '📅 複数日選択';
+    bar.style.display = 'none';
+    singlePanel.style.display = '';
+    multiPanel.style.display = 'none';
+  }
+  renderCal();
+  updateMultiPanel();
+}
+
+function updateMultiPanel() {
+  const count = selectedDates.size;
+  const countBar = document.getElementById('multiCountBar');
+  const multiInputForm = document.getElementById('multiInputForm');
+  const label = document.getElementById('multiCountLabel');
+  const hint = document.querySelector('#multiModePanel .hint');
+  document.getElementById('multiErr').style.display = 'none';
+  document.getElementById('multiResult').style.display = 'none';
+  if (count === 0) {
+    countBar.style.display = 'none';
+    multiInputForm.style.display = 'none';
+    if (hint) hint.style.display = '';
+  } else {
+    countBar.style.display = '';
+    multiInputForm.style.display = '';
+    if (hint) hint.style.display = 'none';
+    label.textContent = `${count}日 選択中`;
+    // スタッフドロップダウン更新（選択日全体で利用可能なスタッフ）
+    const dates = [...selectedDates].sort();
+    // 最初の選択日基準でドロップダウン生成（月prefix用）
+    const monthPfx = dates[0].slice(0,7);
+    const allReg = allRequests.filter(r=>r.type==='work'&&r.date.startsWith(monthPfx));
+    const monthUsed = {};
+    allReg.forEach(r => { monthUsed[r.staff_name] = (monthUsed[r.staff_name]||0) + 1; });
+    const sel = document.getElementById('multiStaffSel');
+    sel.innerHTML = '<option value="">-- 選択してください --</option>' +
+      data.staffs.map(s => {
+        const used = monthUsed[s.name] || 0;
+        const limInfo = s.monthly_limit !== null ? ` (今月${used}/${s.monthly_limit}日)` : '';
+        return `<option value="${s.name}">${s.name}${limInfo}</option>`;
+      }).join('');
+  }
+}
+
+function clearMultiSelect() {
+  selectedDates.clear();
+  renderCal();
+  updateMultiPanel();
+}
+
+// 複数日一括登録
+async function doMultiSubmit() {
+  const staff = document.getElementById('multiStaffSel').value;
+  const errEl = document.getElementById('multiErr');
+  const resultEl = document.getElementById('multiResult');
+  errEl.style.display = 'none';
+  resultEl.style.display = 'none';
+  if (!staff) { errEl.textContent = 'スタッフ名を選択してください'; errEl.style.display = ''; return; }
+  if (selectedDates.size === 0) { errEl.textContent = '日付を選択してください'; errEl.style.display = ''; return; }
+
+  const dates = [...selectedDates].sort();
+  const successDates = [];
+  const skipDates = [];
+
+  showLoad('一括登録中...');
+  for (const ds of dates) {
+    const checkErr = await checkBeforeInsert(staff, ds);
+    if (checkErr) {
+      skipDates.push({ ds, reason: checkErr });
+      continue;
+    }
+    const { error } = await sb.from('shift_requests').insert([{
+      id: uid(), store_id: storeId, staff_name: staff, date: ds, type: 'work'
+    }]);
+    if (error) {
+      const msg = error.code === '23505' ? 'すでに登録済み' : error.message;
+      skipDates.push({ ds, reason: msg });
+    } else {
+      successDates.push(ds);
+    }
+  }
+  await loadData();
+  hideLoad();
+  renderCal();
+  renderSummary();
+
+  // 結果表示
+  let resultMsg = '';
+  if (successDates.length > 0) {
+    resultMsg += '✅ ' + successDates.length + '日 登録しました（' + successDates.map(d=>d.slice(5)).join('・') + '）';
+  }
+  if (skipDates.length > 0) {
+    const skipLines = skipDates.map(({ds, reason}) => ds.slice(5) + '：' + reason).join('\n');
+    resultMsg += (resultMsg ? '\n' : '') + '⚠ ' + skipDates.length + '日 スキップ：\n' + skipLines;
+    errEl.textContent = resultMsg;
+    errEl.style.display = '';
+  } else {
+    resultEl.textContent = resultMsg;
+    resultEl.style.display = '';
+  }
+
+  // 成功した日は選択解除
+  successDates.forEach(ds => selectedDates.delete(ds));
+  renderCal();
+  updateMultiPanel();
+  if (curTab === 'list') renderList();
 }
 
 function openModal(ds) {
@@ -923,7 +1113,8 @@ async function checkBeforeInsert(staff, date) {
       .select('staff_name,date,type')
       .eq('staff_name', staff)
       .eq('type', 'work')
-      .like('date', monthPfx + '%');
+      .gte('date', monthPfx + '-01')
+      .lte('date', monthPfx + '-31');
     const usedAll = monthLatest ? monthLatest.length : 0;
     if (usedAll >= staffObj.monthly_limit) {
       return `${staff} は今月の勤務上限（${staffObj.monthly_limit}日）に達しています（全ユニット合算）。`;
