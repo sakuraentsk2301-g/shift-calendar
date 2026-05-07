@@ -1276,7 +1276,8 @@ function renderList() {
     if (!bulkDeleteMode) {
       h += `<button class="btn btn-danger btn-sm" style="margin-top:0" onclick="toggleBulkDelete()">☑ 一括削除</button>`;
     } else {
-      h += `<button class="btn btn-secondary btn-sm" style="margin-top:0" onclick="selectAllReqs(${JSON.stringify(reqs.map(r=>r.id))})">全選択</button>`;
+      window._allReqIds = reqs.map(r=>r.id);
+      h += `<button class="btn btn-secondary btn-sm" style="margin-top:0" onclick="selectAllReqs(window._allReqIds)">全選択</button>`;
       h += `<button class="btn btn-secondary btn-sm" style="margin-top:0" onclick="clearReqSelect()">解除</button>`;
       h += `<button class="btn btn-danger btn-sm" style="margin-top:0;${checkedCount===0?'opacity:.4;pointer-events:none':''}" onclick="doBulkDelete()">削除 ${checkedCount>0?'('+checkedCount+'件)':''}</button>`;
       h += `<button class="btn btn-secondary btn-sm" style="margin-top:0" onclick="toggleBulkDelete()">✕ キャンセル</button>`;
