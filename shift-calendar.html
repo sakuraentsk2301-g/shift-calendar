@@ -900,14 +900,17 @@ function toggleMultiMode() {
   updateMultiPanel();
 }
 
-function updateMultiPanel() {
+function updateMultiPanel(keepResult = false) {
   const count = selectedDates.size;
   const countBar = document.getElementById('multiCountBar');
   const multiInputForm = document.getElementById('multiInputForm');
   const label = document.getElementById('multiCountLabel');
   const hint = document.querySelector('#multiModePanel .hint');
-  document.getElementById('multiErr').style.display = 'none';
-  document.getElementById('multiResult').style.display = 'none';
+  // keepResult=trueのときは結果表示を消さない
+  if (!keepResult) {
+    document.getElementById('multiErr').style.display = 'none';
+    document.getElementById('multiResult').style.display = 'none';
+  }
   if (count === 0) {
     countBar.style.display = 'none';
     multiInputForm.style.display = 'none';
@@ -1022,7 +1025,7 @@ async function doMultiSubmit() {
   // 成功した日は選択解除
   successDates.forEach(ds => selectedDates.delete(ds));
   renderCal();
-  updateMultiPanel();
+  updateMultiPanel(true); // 結果表示を保持したまま更新
   if (curTab === 'list') renderList();
 }
 
