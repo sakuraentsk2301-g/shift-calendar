@@ -329,8 +329,8 @@ alter table shift_requests disable row level security;</div>
         <div id="multiInputForm" style="display:none">
           <label>スタッフ名を選択</label>
           <select id="multiStaffSel"><option value="">-- 選択してください --</option></select>
-          <div class="alert alert-err" id="multiErr" style="display:none;margin-top:10px"></div>
-          <div class="alert alert-info" id="multiResult" style="display:none;margin-top:10px"></div>
+          <div id="multiErr" style="display:none;margin-top:10px"></div>
+          <div id="multiResult" style="display:none;margin-top:10px"></div>
           <button class="btn btn-primary btn-full" onclick="doMultiSubmit()">選択した日にまとめて登録する</button>
         </div>
       </div>
@@ -976,19 +976,47 @@ async function doMultiSubmit() {
   renderCal();
   renderSummary();
 
-  // 結果表示
-  let resultMsg = '';
+  // 結果表示（HTMLで見やすく）
   if (successDates.length > 0) {
-    resultMsg += '✅ ' + successDates.length + '日 登録しました（' + successDates.map(d=>d.slice(5)).join('・') + '）';
-  }
-  if (skipDates.length > 0) {
-    const skipLines = skipDates.map(({ds, reason}) => ds.slice(5) + '：' + reason).join('\n');
-    resultMsg += (resultMsg ? '\n' : '') + '⚠ ' + skipDates.length + '日 スキップ：\n' + skipLines;
-    errEl.textContent = resultMsg;
-    errEl.style.display = '';
-  } else {
-    resultEl.textContent = resultMsg;
+    let html = '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 14px;">';
+    html += '<div style="font-size:13px;font-weight:600;color:#166534;margin-bottom:6px">✅ ' + successDates.length + '日 登録しました</div>';
+    html += '<div style="display:flex;flex-wrap:wrap;gap:4px">';
+    successDates.forEach(ds => {
+      html += '<span style="background:#dcfce7;color:#166534;font-size:12px;font-weight:600;padding:2px 8px;border-radius:4px">' + ds.slice(5) + '</span>';
+    });
+    html += '</div></div>';
+    resultEl.innerHTML = html;
     resultEl.style.display = '';
+  }
+
+  if (skipDates.length > 0) {
+    // 理由ごとにグループ化
+    const groups = {};
+    skipDates.forEach(({ds, reason}) => {
+      // 理由を短くカテゴリ分け
+      let category = reason;
+      if (reason.includes('別のユニット')) category = '他のユニットで登録済み';
+      else if (reason.includes('勤務可能人数')) category = '勤務可能人数の上限に達している';
+      else if (reason.includes('勤務上限')) category = '月の勤務上限に達している（全ユニット合算）';
+      else if (reason.includes('すでに登録')) category = 'すでに登録済み';
+      if (!groups[category]) groups[category] = [];
+      groups[category].push(ds.slice(5));
+    });
+
+    let html = '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;padding:10px 14px;margin-top:8px;">';
+    html += '<div style="font-size:13px;font-weight:600;color:#991b1b;margin-bottom:8px">⚠ ' + skipDates.length + '日 登録できませんでした</div>';
+    Object.entries(groups).forEach(([reason, dates]) => {
+      html += '<div style="margin-bottom:8px">';
+      html += '<div style="font-size:12px;color:#7f1d1d;margin-bottom:4px">▶ ' + reason + '</div>';
+      html += '<div style="display:flex;flex-wrap:wrap;gap:3px">';
+      dates.forEach(d => {
+        html += '<span style="background:#fee2e2;color:#991b1b;font-size:11px;font-weight:600;padding:2px 7px;border-radius:4px">' + d + '</span>';
+      });
+      html += '</div></div>';
+    });
+    html += '</div>';
+    errEl.innerHTML = html;
+    errEl.style.display = '';
   }
 
   // 成功した日は選択解除
