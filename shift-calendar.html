@@ -115,6 +115,8 @@ input:focus,select:focus{border-color:#3b6ef8;box-shadow:0 0 0 3px rgba(59,110,2
 .multi-toggle{background:none;border:1.5px solid #f59e0b;border-radius:6px;padding:4px 10px;font-size:12px;font-weight:600;color:#92400e;cursor:pointer;font-family:inherit}
 .multi-toggle.on{background:#f59e0b;color:#fff;border-color:#f59e0b}
 .cal-cell.multi-sel{background:#fef9c3!important;border-color:#f59e0b!important;box-shadow:inset 0 0 0 2px #f59e0b}
+.cal-cell.out-of-range{background:#f9f9f9!important;opacity:.45;cursor:not-allowed!important}
+.cal-cell.out-of-range:hover{background:#f9f9f9!important}
 .cal-cell.multi-sel .dnum{background:#f59e0b;color:#fff!important;border-radius:50%}
 .multi-count-bar{background:#0f1f45;color:#fff;border-radius:8px;padding:10px 14px;font-size:13px;font-weight:600;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between}
 .multi-clear-btn{background:rgba(255,255,255,0.2);border:none;border-radius:5px;color:#fff;font-size:11px;padding:3px 8px;cursor:pointer;font-family:inherit}
@@ -393,6 +395,14 @@ let selectedReqIds = new Set();  // 削除選択中の希望IDセット
 let createdId = null, createdVToken = null;
 
 const K_URL = 'sft2_url', K_KEY = 'sft2_key', K_RECENT = 'sft2_recent';
+const MAX_MONTHS_AHEAD = 6; // 登録可能な最大月数（今月含まず6ヶ月先まで）
+
+function getMaxDate() {
+  const now = new Date();
+  // 当月の月初を基準に3ヶ月先の月末まで
+  const d = new Date(now.getFullYear(), now.getMonth() + MAX_MONTHS_AHEAD + 1, 0);
+  return fmtD(d);
+}
 const MN = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
 
 // 12色パレット [背景色, テキスト色, ラベル]
@@ -679,12 +689,15 @@ function renderCal() {
     const capObj=data.caps.find(c=>c.date===ds);
     const cap=capObj?capObj.capacity:null;
     const full=cap!==null&&reqs.length>=cap;
+    const maxDate = getMaxDate();
+    const outOfRange = role !== 'admin' && ds > maxDate;
     const cls=['cal-cell',
       dow===0?'sun-cell':dow===6?'sat-cell':'',
       ds===today?'today':'',
       (!multiMode && ds===selDate)?'sel':'',
       (multiMode && selectedDates.has(ds))?'multi-sel':'',
-      full?'full-day':''
+      full?'full-day':'',
+      outOfRange?'out-of-range':''
     ].filter(Boolean).join(' ');
 
     // 上限表示
@@ -846,6 +859,11 @@ function renderSummary() {
 
 // ---- Date select ----
 function selDay(ds) {
+  // 3ヶ月先以降は登録不可（管理者は制限なし）
+  if (role !== 'admin' && ds > getMaxDate()) {
+    showToast('登録できるのは6ヶ月先までです');
+    return;
+  }
   if (multiMode) {
     // 複数日選択モード：タップで選択/解除
     if (selectedDates.has(ds)) {
@@ -1113,6 +1131,10 @@ function closeModal(e) {
 
 // 登録直前にSupabaseから最新データを取得して競合チェック
 async function checkBeforeInsert(staff, date) {
+  // 3ヶ月先以降は登録不可（管理者は制限なし）
+  if (role !== 'admin' && date > getMaxDate()) {
+    return '登録できるのは6ヶ月先までです';
+  }
   // 最新の全ユニット出勤希望を再取得
   const { data: latest } = await sb.from('shift_requests')
     .select('store_id,staff_name,date,type')
