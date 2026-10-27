@@ -751,11 +751,11 @@ function renderSummary() {
   allMonthReqs.forEach(r => { staffTotals[r.staff_name] = (staffTotals[r.staff_name]||0) + 1; });
   // このユニットのスタッフのみ表示対象に絞る
   const myStaffNames = data.staffs.map(s => s.name);
-  // 当月合計件数（全ユニット合算・全スタッフ）
-  const monthTotal = allMonthReqs.length;
   const staffSorted = Object.entries(staffTotals)
     .filter(([n]) => myStaffNames.includes(n))
     .sort((a,b) => b[1]-a[1]);
+  // 当月合計件数＝スタッフ別日数の合計（全ユニット合算・このユニットのスタッフのみ）
+  const monthTotal = staffSorted.reduce((sum,[,cnt]) => sum+cnt, 0);
 
   let html = '';
 
