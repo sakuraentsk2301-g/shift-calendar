@@ -648,7 +648,7 @@ async function loadData() {
       .gte('date', mCur + '-01').lte('date', mCur + '-' + String(curLastDay).padStart(2,'0')),
     sb.from('daily_capacities').select('*').eq('store_id', storeId),
     sb.from('shift_requests').select('store_id,staff_name,date,type')
-      .gte('date', mPrev + '-01').lte('date', mNext + '-' + String(nextLastDay).padStart(2,'0')),
+      .gte('date', mPrev + '-01').lte('date', mNext + '-' + String(nextLastDay).padStart(2,'0')).limit(5000),
     sb.from('stores').select('id,name')
   ]);
   data.staffs  = s.data    || [];
@@ -747,11 +747,10 @@ function renderSummary() {
   }
   if (week.length > 0) weeks.push(week);
 
-  // スタッフごとの当月合計（data.requestsは当月このユニット分のみ・完全なデータ）
+  // スタッフごとの当月合計（全ユニット合算）
   const staffTotals = {};
   const allMonthReqs = allRequests.filter(r => r.type === 'work' && r.date.startsWith(monthPfx));
-  // 当月集計はdata.requestsを使う（allRequestsは件数上限で欠落する可能性があるため）
-  data.requests.filter(r => r.type === 'work').forEach(r => { staffTotals[r.staff_name] = (staffTotals[r.staff_name]||0) + 1; });
+  allMonthReqs.forEach(r => { staffTotals[r.staff_name] = (staffTotals[r.staff_name]||0) + 1; });
   // このユニットのスタッフのみ表示対象に絞る
   const myStaffNames = data.staffs.map(s => s.name);
   const staffSorted = Object.entries(staffTotals)
