@@ -745,16 +745,14 @@ function renderSummary() {
   }
   if (week.length > 0) weeks.push(week);
 
-  // 当月の出勤希望（このユニット分）
-  const monthReqs = data.requests.filter(r => r.type === 'work' && r.date.startsWith(monthPfx));
-  const monthTotal = monthReqs.length;
-
   // スタッフごとの当月合計（全ユニット合算）
   const staffTotals = {};
   const allMonthReqs = allRequests.filter(r => r.type === 'work' && r.date.startsWith(monthPfx));
   allMonthReqs.forEach(r => { staffTotals[r.staff_name] = (staffTotals[r.staff_name]||0) + 1; });
   // このユニットのスタッフのみ表示対象に絞る
   const myStaffNames = data.staffs.map(s => s.name);
+  // 当月合計件数（全ユニット合算）※このユニットのスタッフ分のみカウント
+  const monthTotal = allMonthReqs.filter(r => myStaffNames.includes(r.staff_name)).length;
   const staffSorted = Object.entries(staffTotals)
     .filter(([n]) => myStaffNames.includes(n))
     .sort((a,b) => b[1]-a[1]);
