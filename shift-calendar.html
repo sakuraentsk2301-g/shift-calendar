@@ -638,15 +638,17 @@ function getMonthRange() {
 
 async function loadData() {
   const [mPrev, mCur, mNext] = getMonthRange();
-  // このユニットのシフト希望は表示月のみ
-  // 全ユニットのシフト希望は前月〜翌月に限定（競合チェック・合算用）
+  // 当月の末日を正確に計算
+  const curLastDay = new Date(parseInt(mCur.slice(0,4)), parseInt(mCur.slice(5,7)), 0).getDate();
+  const prevLastDay = new Date(parseInt(mPrev.slice(0,4)), parseInt(mPrev.slice(5,7)), 0).getDate();
+  const nextLastDay = new Date(parseInt(mNext.slice(0,4)), parseInt(mNext.slice(5,7)), 0).getDate();
   const [s, rq, cp, allRq, stores] = await Promise.all([
     sb.from('staffs').select('*').eq('store_id', storeId).order('created_at'),
     sb.from('shift_requests').select('*').eq('store_id', storeId)
-      .gte('date', mCur + '-01').lte('date', mCur + '-31'),
+      .gte('date', mCur + '-01').lte('date', mCur + '-' + String(curLastDay).padStart(2,'0')),
     sb.from('daily_capacities').select('*').eq('store_id', storeId),
     sb.from('shift_requests').select('store_id,staff_name,date,type')
-      .gte('date', mPrev + '-01').lte('date', mNext + '-31'), // 前月〜翌月に限定
+      .gte('date', mPrev + '-01').lte('date', mNext + '-' + String(nextLastDay).padStart(2,'0')),
     sb.from('stores').select('id,name')
   ]);
   data.staffs  = s.data    || [];
